@@ -9,11 +9,11 @@ const movies = [];
 $('.card').each((i, el) => {
   const poster = $(el).find('.poster-box img').attr('src');
   
-  let title = '', starcast = '', genres = '', quality = '', duration = '', releaseDate = '', overview = '';
+  let title = '', starcast = '', genres = '', quality = '', duration = '', releaseDate = '', overview = '', category = '';
   
   $(el).find('.row').each((_, row) => {
     const label = $(row).find('.label').text().trim();
-    const val = $(row).find('.val-blue, .val-green').text().trim();
+    const val = $(row).find('.val-blue, .val-green, .val-orange').text().trim();
     
     if (label.includes('Movie Name')) title = val;
     if (label.includes('Starcast')) starcast = val;
@@ -22,6 +22,7 @@ $('.card').each((i, el) => {
     if (label.includes('Length')) duration = val;
     if (label.includes('Release Date')) releaseDate = val;
     if (label.includes('Movie Story')) overview = val;
+    if (label.includes('Category')) category = val;
   });
 
   const downloadLinks = [];
@@ -47,6 +48,7 @@ $('.card').each((i, el) => {
     overview,
     quality,
     downloadLinks,
+    category,
     type: i < 5 ? 'hero' : (i < 15 ? 'popular' : 'trending')
   });
 });

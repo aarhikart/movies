@@ -11,14 +11,16 @@ export async function GET(request: Request) {
   } catch (e) {
     console.error("Failed to load movies.json", e);
   }
-  const { searchParams } = new URL(request.url);
-  const q = searchParams.get('q');
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '20');
-  const type = searchParams.get('type');
-  const filter = searchParams.get('filter'); // NEW: For chips like "Action", "Bollywood", etc.
+  
+  // Create a new URL object to get params
+  const url = new URL(request.url);
+  const q = url.searchParams.get('q');
+  const page = parseInt(url.searchParams.get('page') || '1');
+  const limit = parseInt(url.searchParams.get('limit') || '20');
+  const type = url.searchParams.get('type');
+  const filter = url.searchParams.get('filter');
 
-  let results = movies;
+  let results = [...movies];
 
   // Search filtering
   if (q) {
@@ -26,23 +28,60 @@ export async function GET(request: Request) {
     results = results.filter((m: any) => m.title.toLowerCase().includes(query));
   }
 
-  // Type filtering (popular, trending, hero)
-  if (type) {
-    results = results.filter((m: any) => m.type === type);
+  // Strict Category filtering
+  if (filter && filter !== 'All') {
+    results = results.filter((m: any) => m.category === filter);
   }
 
-  // Chip filtering
-  if (filter && filter !== 'All') {
-    const f = filter.toLowerCase();
-    if (f === 'bollywood') {
-      results = results.filter((m: any) => m.title.toLowerCase().includes('hindi'));
-    } else if (f === 'movies') {
-      results = results.filter((m: any) => m.title.toLowerCase().includes('movie'));
-    } else if (f === 'tv shows' || f === 'web series') {
-      results = results.filter((m: any) => m.title.toLowerCase().includes('series') || m.title.toLowerCase().includes('show') || m.title.toLowerCase().includes('season'));
+  // Type filtering (popular, trending, hero)
+  if (type) {
+    const typeResults = results.filter((m: any) => m.type === type);
+    if (typeResults.length > 0) {
+      results = typeResults;
     } else {
-      // Treat as genre (Action, Comedy, Drama, etc)
-      results = results.filter((m: any) => m.genre && m.genre.toLowerCase().includes(f));
+      if (type === 'hero') results = results.slice(0, 5);
+      if (type === 'popular') results = results.slice(5, 20);
+      if (type === 'trending') results = results.slice(20, 35);
+    }
+  } else {
+    // If NOT fetching a specific type (i.e. fetching the main All Movies grid)
+    // and we are on the "All" tab (no filter), sort Bollywood -> Hindi Web Series -> Other!
+    if (!filter || filter === 'All') {
+      const getRank = (m: any) => {
+        const t = m.title ? m.title.toLowerCase() : '';
+        const c = m.category ? m.category.toLowerCase() : '';
+        const i = m.industry ? m.industry.toLowerCase() : '';
+        
+        if (i === 'bollywood' || c.includes('bollywood') || t.includes('hindi movie')) {
+          return 1;
+        }
+        if (c.includes('hindi dubbed') || (t.includes('hindi') && (t.includes('series') || t.includes('season') || c.includes('web series')))) {
+          return 2;
+        }
+        return 3;
+      };
+
+      const bollywood = results.filter((m: any) => getRank(m) === 1);
+      const hindiWebSeries = results.filter((m: any) => getRank(m) === 2);
+      const others = results.filter((m: any) => getRank(m) === 3);
+
+      const mixedResults = [];
+      let bIdx = 0;
+      let hIdx = 0;
+
+      // Interleave 50/50
+      while (bIdx < bollywood.length || hIdx < hindiWebSeries.length) {
+        if (bIdx < bollywood.length) {
+          mixedResults.push(bollywood[bIdx]);
+          bIdx++;
+        }
+        if (hIdx < hindiWebSeries.length) {
+          mixedResults.push(hindiWebSeries[hIdx]);
+          hIdx++;
+        }
+      }
+
+      results = [...mixedResults, ...others];
     }
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, UIEvent } from "react";
-import { Search, Mic, Play, Download, X, Star, ArrowLeft } from "lucide-react";
+import { Search, Mic, Play, Download, X, Star, ArrowLeft, Lock } from "lucide-react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
@@ -17,6 +17,8 @@ type Movie = {
   starcast?: string;
   overview?: string;
   quality?: string;
+  category?: string;
+  industry?: string;
   downloadLinks: { label: string; url: string }[];
   type?: string;
 };
@@ -26,6 +28,7 @@ export default function Page() {
   const [activeChip, setActiveChip] = useState("All");
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
+  const [showPremiumPopup, setShowPremiumPopup] = useState(false);
   
   // Data states
   const [heroMovies, setHeroMovies] = useState<Movie[]>([]);
@@ -42,7 +45,19 @@ export default function Page() {
   
   const [viewingCategory, setViewingCategory] = useState<{title: string, data: Movie[]} | null>(null);
 
-  const chips = ["All", "Bollywood", "Movies", "Web Series", "Action", "Comedy", "Drama", "Thriller", "Horror"];
+  const [chips, setChips] = useState<string[]>(["All"]);
+
+  // Fetch unique categories for the filter chips
+  useEffect(() => {
+    fetch('/api/categories')
+      .then(res => res.json())
+      .then(data => {
+        if (data.categories && data.categories.length > 0) {
+          setChips(["All", ...data.categories]);
+        }
+      })
+      .catch(console.error);
+  }, []);
 
   // Fetch filtered "All Movies" and categories when activeChip changes
   useEffect(() => {
@@ -358,8 +373,9 @@ export default function Page() {
             >
               <button 
                 onClick={() => {
-                  if (showDownloadOptions) {
+                  if (showDownloadOptions || showPremiumPopup) {
                     setShowDownloadOptions(false);
+                    setShowPremiumPopup(false);
                   } else {
                     setSelectedMovie(null);
                   }
@@ -369,7 +385,24 @@ export default function Page() {
                 <X className="w-4 h-4" />
               </button>
 
-              {showDownloadOptions ? (
+              {showPremiumPopup ? (
+                <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                  <div className="w-20 h-20 bg-[#fff5f5] rounded-full flex items-center justify-center mb-6">
+                    <Lock className="w-10 h-10 text-[#ff4b4b]" />
+                  </div>
+                  <h2 className="text-[24px] font-bold text-gray-900 mb-3">Premium Content</h2>
+                  <p className="text-[15px] text-gray-500 mb-8 max-w-[280px]">
+                    Watching movies directly in the app is exclusively available for our premium subscribers.
+                  </p>
+                  
+                  <button 
+                    onClick={() => setShowPremiumPopup(false)}
+                    className="w-full bg-[#f5f6f8] text-gray-800 rounded-[18px] py-4 font-bold text-[15px] hover:bg-gray-200 transition-colors"
+                  >
+                    Back to Details
+                  </button>
+                </div>
+              ) : showDownloadOptions ? (
                 <div className="flex flex-col h-[50dvh] overflow-y-auto hide-scrollbar">
                   <h2 className="text-[20px] font-bold text-gray-900 mb-6 mt-1 pr-10">Select Download Quality</h2>
                   
@@ -451,7 +484,10 @@ export default function Page() {
                   )}
 
                   <div className="flex gap-3 pb-2 mt-auto">
-                    <button className="flex-1 bg-[#7b46fa] hover:bg-[#6834eb] text-white rounded-[18px] py-4 flex items-center justify-center gap-2 font-bold text-[15px] transition-colors shadow-[0_4px_15px_rgba(123,70,250,0.3)]">
+                    <button 
+                      onClick={() => setShowPremiumPopup(true)}
+                      className="flex-1 bg-[#7b46fa] hover:bg-[#6834eb] text-white rounded-[18px] py-4 flex items-center justify-center gap-2 font-bold text-[15px] transition-colors shadow-[0_4px_15px_rgba(123,70,250,0.3)]"
+                    >
                       <Play className="w-5 h-5 fill-current" /> Watch Now
                     </button>
                     <button 
