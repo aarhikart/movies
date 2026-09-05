@@ -29,6 +29,7 @@ export default function Page() {
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [showPremiumPopup, setShowPremiumPopup] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
   
   // Data states
   const [heroMovies, setHeroMovies] = useState<Movie[]>([]);
@@ -46,6 +47,8 @@ export default function Page() {
   const [viewingCategory, setViewingCategory] = useState<{title: string, data: Movie[]} | null>(null);
 
   const [chips, setChips] = useState<string[]>(["All"]);
+
+
 
   // Fetch unique categories for the filter chips
   useEffect(() => {
@@ -136,7 +139,28 @@ export default function Page() {
 
   return (
     <div className="relative w-full max-w-[400px] mx-auto h-[100dvh] bg-white text-black overflow-hidden flex flex-col font-sans">
-      
+      {/* Splash Screen */}
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div 
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            transition={{ duration: 0.6, ease: "easeInOut" }}
+            className="absolute inset-0 z-[100] bg-white flex items-center justify-center"
+          >
+            <video 
+              autoPlay 
+              muted 
+              playsInline 
+              className="w-full h-full object-cover"
+              onEnded={() => setShowSplash(false)}
+            >
+              <source src="/video-logo.mp4" type="video/mp4" />
+            </video>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {viewingCategory ? (
         // Category Detail View
         <div className="flex-1 flex flex-col overflow-hidden">
