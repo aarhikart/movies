@@ -174,7 +174,7 @@ export default function Page() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pb-10">
               {viewingCategory.data.map((movie) => (
                 <div key={movie.id} className="cursor-pointer flex flex-col" onClick={() => setSelectedMovie(movie)}>
-                  <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden mb-2.5 shadow-sm bg-gray-100">
+                  <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden mb-2.5 shadow-sm bg-placeholder">
                     {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
                     {movie.rating && (
                       <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded-md flex items-center gap-1 font-medium">
@@ -224,7 +224,7 @@ export default function Page() {
                         setSearchQuery("");
                       }}
                     >
-                      <div className="relative w-12 h-16 rounded-md overflow-hidden flex-shrink-0 bg-gray-100">
+                      <div className="relative w-12 h-16 rounded-md overflow-hidden flex-shrink-0 bg-placeholder">
                         {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
                       </div>
                       <div>
@@ -265,7 +265,7 @@ export default function Page() {
                 <div 
                   key={movie.id} 
                   className={clsx(
-                    "relative h-[210px] rounded-[24px] overflow-hidden flex-shrink-0 snap-center cursor-pointer bg-gray-100",
+                    "relative h-[210px] rounded-[24px] overflow-hidden flex-shrink-0 snap-center cursor-pointer bg-placeholder",
                     idx === 0 ? "w-[85%]" : "w-[85%]"
                   )}
                   onClick={() => setSelectedMovie(movie)}
@@ -307,7 +307,7 @@ export default function Page() {
               <div className="flex gap-4 overflow-x-auto hide-scrollbar -mx-5 px-5 pb-2">
                 {popularMovies.map((movie) => (
                   <div key={movie.id} className="w-[130px] flex-shrink-0 cursor-pointer" onClick={() => setSelectedMovie(movie)}>
-                    <div className="relative h-[190px] rounded-2xl overflow-hidden mb-2.5 bg-gray-100">
+                    <div className="relative h-[190px] rounded-2xl overflow-hidden mb-2.5 bg-placeholder">
                       {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
                       <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[11px] px-1.5 py-0.5 rounded-md flex items-center gap-1 font-medium">
                         <Star className="w-3 h-3 text-[#ffb800] fill-current" /> {movie.rating}
@@ -336,7 +336,7 @@ export default function Page() {
               <div className="flex gap-4 overflow-x-auto hide-scrollbar -mx-5 px-5 pb-4">
                 {trendingMovies.map((movie) => (
                   <div key={movie.id} className="w-[130px] flex-shrink-0 cursor-pointer" onClick={() => setSelectedMovie(movie)}>
-                    <div className="relative h-[190px] rounded-2xl overflow-hidden mb-2.5 bg-gray-100">
+                    <div className="relative h-[190px] rounded-2xl overflow-hidden mb-2.5 bg-placeholder">
                       {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
                     </div>
                     <h4 className="font-bold text-[14px] text-gray-900 leading-tight truncate">{movie.title.replace(/\s\(\d{4}\).*$/, '')}</h4>
@@ -353,7 +353,7 @@ export default function Page() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {allMovies.map((movie) => (
                 <div key={movie.id} className="cursor-pointer flex flex-col" onClick={() => setSelectedMovie(movie)}>
-                  <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden mb-2.5 shadow-sm bg-gray-100">
+                  <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden mb-2.5 shadow-sm bg-placeholder">
                     {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
                     {movie.rating && (
                       <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded-md flex items-center gap-1 font-medium">
@@ -463,7 +463,7 @@ export default function Page() {
               ) : (
                 <div className="flex flex-col overflow-y-auto hide-scrollbar">
                   <div className="flex gap-4 mb-5">
-                    <div className="relative w-[110px] h-[155px] rounded-2xl overflow-hidden flex-shrink-0 shadow-sm bg-gray-100">
+                    <div className="relative w-[110px] h-[155px] rounded-2xl overflow-hidden flex-shrink-0 shadow-sm bg-placeholder">
                       {selectedMovie.image && <Image src={selectedMovie.image} alt={selectedMovie.title} fill className="object-cover" />}
                     </div>
                     <div className="flex-1 pt-0 pr-8">
