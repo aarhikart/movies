@@ -50,7 +50,58 @@ export default function Page() {
 
   const [chips, setChips] = useState<string[]>(["All"]);
 
+  // PWA Phone Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
 
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBanner(true);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+
+    // On mobile devices, if not already installed, show suggestion banner
+    const isStandalone = typeof window !== "undefined" && 
+      (window.matchMedia("(display-mode: standalone)").matches || (window.navigator as any).standalone === true);
+    
+    if (!isStandalone) {
+      const dismissed = typeof window !== "undefined" ? sessionStorage.getItem("dismissed_install_banner") : null;
+      if (!dismissed) {
+        const timer = setTimeout(() => setShowInstallBanner(true), 2500);
+        return () => {
+          window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+          clearTimeout(timer);
+        };
+      }
+    }
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallApp = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === "accepted") {
+          setShowInstallBanner(false);
+        }
+      });
+    } else {
+      alert("To install MovieMela on your phone:\n\n1. Tap your browser's Menu (⋮) or Share button (📤).\n2. Tap 'Add to Home Screen' or 'Install App'.");
+    }
+  };
+
+  const handleDismissBanner = () => {
+    setShowInstallBanner(false);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("dismissed_install_banner", "true");
+    }
+  };
 
   // Fetch unique categories for the filter chips
   useEffect(() => {
@@ -546,6 +597,46 @@ export default function Page() {
               )}
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Phone Install App Suggestion Banner */}
+      <AnimatePresence>
+        {showInstallBanner && !showSplash && !selectedMovie && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="fixed bottom-4 left-4 right-4 max-w-[370px] mx-auto bg-[#0c1021]/95 backdrop-blur-md border border-white/15 text-white p-3 rounded-[22px] shadow-2xl z-40 flex items-center justify-between gap-3"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative w-9 h-9 rounded-xl overflow-hidden bg-white p-1 flex-shrink-0 shadow-md">
+                <Image src="/logo.png" alt="MovieMela" fill className="object-contain" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-[13px] font-bold text-white leading-tight truncate">Install MovieMela</h4>
+                <p className="text-[11px] text-gray-300 truncate">Add to phone home screen</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button
+                onClick={handleInstallApp}
+                className="bg-[#553cfb] hover:bg-[#4730e0] active:scale-95 text-white px-3 py-1.5 rounded-full font-bold text-[12px] shadow-md transition-all flex items-center gap-1"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Install
+              </button>
+              <button
+                onClick={handleDismissBanner}
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-gray-300 flex items-center justify-center transition-colors"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
