@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getFilterForCategory } from '../../categoryHelper';
 
 export async function GET(request: Request) {
   let movies = [];
@@ -28,9 +29,14 @@ export async function GET(request: Request) {
     results = results.filter((m: any) => m.title.toLowerCase().includes(query));
   }
 
-  // Strict Category filtering
+  // Category filtering using mapped category names
   if (filter && filter !== 'All') {
-    results = results.filter((m: any) => m.category === filter);
+    const filterLower = filter.toLowerCase();
+    results = results.filter((m: any) => {
+      if (!m.category) return false;
+      const mapped = getFilterForCategory(m.category);
+      return mapped.toLowerCase() === filterLower;
+    });
   }
 
   // Type filtering (popular, trending, hero)
@@ -48,14 +54,11 @@ export async function GET(request: Request) {
     // and we are on the "All" tab (no filter), sort Bollywood -> Hindi Web Series -> Other!
     if (!filter || filter === 'All') {
       const getRank = (m: any) => {
-        const t = m.title ? m.title.toLowerCase() : '';
-        const c = m.category ? m.category.toLowerCase() : '';
-        const i = m.industry ? m.industry.toLowerCase() : '';
-        
-        if (i === 'bollywood' || c.includes('bollywood') || t.includes('hindi movie')) {
+        const mapped = getFilterForCategory(m.category);
+        if (mapped === 'Bollywood') {
           return 1;
         }
-        if (c.includes('hindi dubbed') || (t.includes('hindi') && (t.includes('series') || t.includes('season') || c.includes('web series')))) {
+        if (mapped === 'Hindi web Series') {
           return 2;
         }
         return 3;

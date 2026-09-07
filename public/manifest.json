@@ -1,0 +1,16 @@
+{
+  "name": "MovieHub",
+  "short_name": "MovieHub",
+  "description": "Watch and download the latest movies and web series.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#553cfb",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

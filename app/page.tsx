@@ -3,6 +3,7 @@
 import { useState, useEffect, UIEvent } from "react";
 import { Search, Mic, Play, Download, X, Star, ArrowLeft, Lock } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
 
@@ -29,6 +30,7 @@ export default function Page() {
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [showPremiumPopup, setShowPremiumPopup] = useState(false);
+  const [selectedAction, setSelectedAction] = useState<"watch" | "download">("download");
   const [showSplash, setShowSplash] = useState(true);
   
   // Data states
@@ -192,6 +194,8 @@ export default function Page() {
       ) : (
         // Main Dashboard
         <div className="flex-1 overflow-y-auto px-5 pt-4 pb-10 hide-scrollbar" onScroll={handleScroll}>
+
+
           {/* Search Bar */}
           <div className="relative">
             <div className="flex items-center bg-[#f5f6f8] rounded-full px-4 py-3 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]">
@@ -428,25 +432,36 @@ export default function Page() {
                 </div>
               ) : showDownloadOptions ? (
                 <div className="flex flex-col h-[50dvh] overflow-y-auto hide-scrollbar">
-                  <h2 className="text-[20px] font-bold text-gray-900 mb-6 mt-1 pr-10">Select Download Quality</h2>
+                  <div className="mb-4 pr-10">
+                    <h2 className="text-[20px] font-bold text-gray-900 leading-tight">
+                      {selectedAction === "watch" ? "Select Watch Quality" : "Select Download Quality"}
+                    </h2>
+                    <p className="text-[12px] text-gray-500 mt-1">
+                      {selectedAction === "watch"
+                        ? "Watch online & download in the background"
+                        : "Select quality to download to your device"}
+                    </p>
+                  </div>
                   
                   {selectedMovie.downloadLinks && selectedMovie.downloadLinks.length > 0 ? (
                     <div className="flex flex-col gap-3 pb-6">
                       {selectedMovie.downloadLinks.map((link, idx) => (
-                        <a 
+                        <Link 
                           key={idx}
-                          href={link.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="w-full bg-[#f9fafc] border border-gray-100 p-4 rounded-[16px] flex items-center justify-between hover:bg-[#f0f2f5] transition-colors"
+                          href={`/download?url=${encodeURIComponent(link.url)}&name=${encodeURIComponent(link.label)}&movie=${encodeURIComponent(selectedMovie.title)}&image=${encodeURIComponent(selectedMovie.image || '')}&quality=${encodeURIComponent(selectedMovie.quality || '')}&mode=${selectedAction}`}
+                          className="w-full bg-[#f9fafc] border border-gray-100 p-4 rounded-[18px] flex items-center justify-between hover:bg-[#553cfb]/5 hover:border-[#553cfb]/30 transition-all group"
                         >
-                          <div className="text-[14px] font-semibold text-gray-800 break-words line-clamp-2 mr-3">
+                          <div className="text-[14px] font-semibold text-gray-800 break-words line-clamp-2 mr-3 group-hover:text-[#553cfb] transition-colors">
                             {link.label.replace(/^[^a-zA-Z0-9]+/, '')}
                           </div>
-                          <div className="bg-[#7b46fa] p-2 rounded-full flex-shrink-0">
-                            <Download className="w-4 h-4 text-white" />
+                          <div className="bg-[#7b46fa] group-hover:bg-[#553cfb] p-2.5 rounded-full flex-shrink-0 shadow-sm transition-colors">
+                            {selectedAction === "watch" ? (
+                              <Play className="w-4 h-4 text-white fill-current" />
+                            ) : (
+                              <Download className="w-4 h-4 text-white" />
+                            )}
                           </div>
-                        </a>
+                        </Link>
                       ))}
                     </div>
                   ) : (
@@ -509,14 +524,20 @@ export default function Page() {
 
                   <div className="flex gap-3 pb-2 mt-auto">
                     <button 
-                      onClick={() => setShowPremiumPopup(true)}
-                      className="flex-1 bg-[#7b46fa] hover:bg-[#6834eb] text-white rounded-[18px] py-4 flex items-center justify-center gap-2 font-bold text-[15px] transition-colors shadow-[0_4px_15px_rgba(123,70,250,0.3)]"
+                      onClick={() => {
+                        setSelectedAction("watch");
+                        setShowDownloadOptions(true);
+                      }}
+                      className="flex-1 bg-[#7b46fa] hover:bg-[#6834eb] text-white rounded-[18px] py-4 flex items-center justify-center gap-2 font-bold text-[15px] transition-colors shadow-[0_4px_15px_rgba(123,70,250,0.3)] active:scale-[0.98]"
                     >
                       <Play className="w-5 h-5 fill-current" /> Watch Now
                     </button>
                     <button 
-                      onClick={() => setShowDownloadOptions(true)}
-                      className="flex-1 bg-white border border-gray-200 hover:bg-gray-50 text-gray-800 rounded-[18px] py-4 flex items-center justify-center gap-2 font-bold text-[15px] transition-colors"
+                      onClick={() => {
+                        setSelectedAction("download");
+                        setShowDownloadOptions(true);
+                      }}
+                      className="flex-1 bg-white border border-gray-200 hover:bg-gray-50 text-gray-800 rounded-[18px] py-4 flex items-center justify-center gap-2 font-bold text-[15px] transition-colors active:scale-[0.98]"
                     >
                       <Download className="w-5 h-5" /> Download HD
                     </button>

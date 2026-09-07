@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     }
 
     const filePath = path.join(process.cwd(), 'app', 'movies.json');
-    let existingMovies = [];
+    let existingMovies: any[] = [];
     try {
       const fileContents = fs.readFileSync(filePath, 'utf8');
       existingMovies = JSON.parse(fileContents);
@@ -19,10 +19,14 @@ export async function POST(request: Request) {
       existingMovies = []; // If file doesn't exist, start fresh
     }
 
-    const existingTitles = new Set(existingMovies.map((m: any) => m.title.trim().toLowerCase()));
+    const normalizeTitle = (t: string) => t.trim().replace(/\s+/g, ' ').toLowerCase();
+
+    let maxId = existingMovies.reduce((max: number, m: any) => Math.max(max, parseInt(m.id) || 0), 0);
     
     const $ = cheerio.load(html);
     const newMovies: any[] = [];
+    const titlesUpdated = new Set<string>();
+    const titlesAdded = new Set<string>();
     
     $('.card').each((i, el) => {
       const poster = $(el).find('.poster-box img').attr('src');
@@ -51,13 +55,40 @@ export async function POST(request: Request) {
         });
       });
       
-      // Skip if title already exists in our database
-      if (!title || existingTitles.has(title.trim().toLowerCase())) {
+      if (!title || !title.trim()) {
         return; 
       }
+
+      const normalized = normalizeTitle(title);
+
+      // Check if this title was already added in the current batch; if so, remove previous one
+      const batchIndex = newMovies.findIndex((m: any) => m.title && normalizeTitle(m.title) === normalized);
+      if (batchIndex !== -1) {
+        newMovies.splice(batchIndex, 1);
+      }
+
+      // Check if movie already exists in the database
+      const existingMatch = existingMovies.find((m: any) => m.title && normalizeTitle(m.title) === normalized);
       
-      const rating = (Math.random() * 2 + 7).toFixed(1) + "/10";
-      const newId = String(existingMovies.length + newMovies.length + 1);
+      let movieId = '';
+      let rating = '';
+      let movieType = 'popular';
+
+      if (existingMatch) {
+        // Replace existing movie: keep existing ID and rating
+        movieId = existingMatch.id;
+        rating = existingMatch.rating || ((Math.random() * 2 + 7).toFixed(1) + "/10");
+        movieType = existingMatch.type || 'popular';
+
+        // Remove old movie from existingMovies so it is replaced completely
+        existingMovies = existingMovies.filter((m: any) => !m.title || normalizeTitle(m.title) !== normalized);
+        titlesUpdated.add(normalized);
+      } else {
+        maxId++;
+        movieId = String(maxId);
+        rating = (Math.random() * 2 + 7).toFixed(1) + "/10";
+        titlesAdded.add(normalized);
+      }
 
       // Auto-identify industry
       let textToSearch = (title + " " + downloadLinks.map(l => l.label).join(" ") + " " + genres).toLowerCase();
@@ -76,7 +107,7 @@ export async function POST(request: Request) {
       else industry = 'Bollywood'; // Safe default
 
       newMovies.push({
-        id: newId,
+        id: movieId,
         title,
         image: poster,
         rating,
@@ -88,23 +119,22 @@ export async function POST(request: Request) {
         quality,
         downloadLinks,
         industry, 
-        category, // New field added here
-        type: 'popular'
+        category,
+        type: movieType
       });
-      
-      // Add to set so we don't duplicate within the pasted HTML itself
-      existingTitles.add(title.trim().toLowerCase());
     });
 
     if (newMovies.length > 0) {
-      // Prepend or append new movies. Let's put them at the top so they show up first!
+      // Prepend updated & new movies at the top so the latest version appears first
       const updatedMovies = [...newMovies, ...existingMovies];
       fs.writeFileSync(filePath, JSON.stringify(updatedMovies, null, 2));
     }
 
     return NextResponse.json({ 
       success: true, 
-      addedCount: newMovies.length,
+      addedCount: titlesAdded.size,
+      updatedCount: titlesUpdated.size,
+      totalProcessed: newMovies.length,
       newMovies: newMovies
     });
 

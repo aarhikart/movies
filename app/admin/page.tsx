@@ -7,7 +7,7 @@ import Link from "next/link";
 export default function AdminPage() {
   const [htmlInput, setHtmlInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<{success: boolean, message: string, addedCount?: number} | null>(null);
+  const [result, setResult] = useState<{success: boolean, message: string, addedCount?: number, updatedCount?: number} | null>(null);
 
   const handleGenerate = async () => {
     if (!htmlInput.trim()) {
@@ -33,10 +33,11 @@ export default function AdminPage() {
         setResult({ 
           success: true, 
           message: `Successfully processed!`,
-          addedCount: data.addedCount
+          addedCount: data.addedCount,
+          updatedCount: data.updatedCount
         });
-        if (data.addedCount > 0) {
-          setHtmlInput(""); // Clear input on success if items were added
+        if ((data.addedCount ?? 0) > 0 || (data.updatedCount ?? 0) > 0) {
+          setHtmlInput(""); // Clear input on success if items were processed
         }
       } else {
         setResult({ success: false, message: data.error || "Failed to parse HTML" });
@@ -54,13 +55,13 @@ export default function AdminPage() {
         <Link href="/" className="mr-4 p-2 rounded-full hover:bg-gray-100 transition-colors">
           <ArrowLeft className="w-5 h-5 text-gray-700" />
         </Link>
-        <h1 className="text-xl font-bold text-gray-900">Admin: Add New Movies</h1>
+        <h1 className="text-xl font-bold text-gray-900">Admin: Add & Update Movies</h1>
       </div>
       
       <div className="max-w-4xl w-full mx-auto p-6 flex-1 flex flex-col">
         <p className="text-gray-600 mb-6">
           Paste your newly scraped HTML code (containing the <code>&lt;div class="card"&gt;</code> blocks) into the box below.
-          Clicking "Generate & Save" will automatically convert it to JSON, skip any movies that already exist in your database, and instantly save the new ones to your app!
+          Clicking "Generate & Save" will automatically convert it to JSON. If any movie already exists in your database, the old movie entry will be removed and replaced with this latest updated version!
         </p>
 
         {result && (
@@ -70,9 +71,9 @@ export default function AdminPage() {
               <p className="font-bold">{result.message}</p>
               {result.addedCount !== undefined && (
                 <p className="text-sm mt-1">
-                  {result.addedCount > 0 
-                    ? `Added ${result.addedCount} new movies to your database. They are now live on your app!` 
-                    : "No new movies added (they all already existed in the database)."}
+                  {((result.addedCount ?? 0) > 0 || (result.updatedCount ?? 0) > 0)
+                    ? `Processed ${ (result.addedCount ?? 0) + (result.updatedCount ?? 0) } movies (${result.addedCount ?? 0} new added, ${result.updatedCount ?? 0} replaced/updated). They are now live on your app!` 
+                    : "No movies were processed."}
                 </p>
               )}
             </div>

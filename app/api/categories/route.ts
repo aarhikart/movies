@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getFilterForCategory } from '../../categoryHelper';
 
 export async function GET() {
   let movies = [];
@@ -12,15 +13,23 @@ export async function GET() {
     console.error("Failed to load movies.json", e);
   }
 
-  // Extract unique categories
+  // Extract unique mapped categories for frontend chips
   const categoriesSet = new Set<string>();
   movies.forEach((m: any) => {
     if (m.category && m.category.trim() !== '') {
-      categoriesSet.add(m.category.trim());
+      const mappedFilter = getFilterForCategory(m.category);
+      if (mappedFilter) {
+        categoriesSet.add(mappedFilter);
+      }
     }
   });
 
-  const categories = Array.from(categoriesSet).sort();
+  // Sort categories alphabetically (Bollywood will naturally be first)
+  const categories = Array.from(categoriesSet).sort((a, b) => {
+    if (a.toLowerCase() === 'bollywood') return -1;
+    if (b.toLowerCase() === 'bollywood') return 1;
+    return a.localeCompare(b);
+  });
 
   return NextResponse.json({ categories });
 }
