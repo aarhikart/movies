@@ -11,6 +11,7 @@ export async function GET(request: Request) {
     }
 
     let html = '';
+    let finalUrl = targetUrl;
     try {
       const res = await fetch(targetUrl, {
         headers: {
@@ -19,6 +20,7 @@ export async function GET(request: Request) {
         },
         next: { revalidate: 3600 } // Cache for 1 hour
       });
+      finalUrl = res.url || targetUrl;
       html = await res.text();
     } catch (fetchErr: any) {
       console.error('Download fetch error:', fetchErr);
@@ -29,9 +31,10 @@ export async function GET(request: Request) {
       });
     }
 
+    const finalUrlObj = new URL(finalUrl);
+    const origin = finalUrlObj.origin;
+
     const $ = cheerio.load(html);
-    const parsedUrl = new URL(targetUrl);
-    const origin = parsedUrl.origin;
 
     // Extract File Name
     const fileName = $('.head').text().trim() || 
@@ -64,6 +67,24 @@ export async function GET(request: Request) {
     const servers: { name: string; url: string }[] = [];
     const seenUrls = new Set<string>();
 
+    const idMatch = targetUrl.match(/\/(\d+)\//) || finalUrl.match(/\/(\d+)\//);
+    const movieId = idMatch ? idMatch[1] : '';
+
+    if (movieId) {
+      const s1 = `https://www.filmyzilla67.com/verified/${movieId}/server_1/`;
+      const s2 = `https://www.filmyzilla67.com/verified/${movieId}/server_2/`;
+      servers.push({
+        name: 'Server 1 (Ultra High Speed Direct)',
+        url: s1
+      });
+      servers.push({
+        name: 'Server 2 (Fast Backup Stream)',
+        url: s2
+      });
+      seenUrls.add(s1);
+      seenUrls.add(s2);
+    }
+
     $('a.appsvital, a.newdl, a[href*="/verified/"], a[href*="/dl/"]').each((_, el) => {
       let href = $(el).attr('href')?.trim();
       if (!href || href === '#' || href.startsWith('javascript:')) return;
@@ -74,6 +95,14 @@ export async function GET(request: Request) {
       } else if (!href.startsWith('http')) {
         href = origin + '/' + href;
       }
+
+      // Ensure canonical domain without duplicate www
+      try {
+        const u = new URL(href);
+        u.protocol = 'https:';
+        u.host = finalUrlObj.host;
+        href = u.toString();
+      } catch (e) {}
 
       if (seenUrls.has(href)) return;
       seenUrls.add(href);
@@ -90,11 +119,38 @@ export async function GET(request: Request) {
       });
     });
 
+    // Resolve any /verified/ server links to their direct /dl/?token=... URLs
+    const resolvedServers = await Promise.all(
+      servers.map(async (server) => {
+        if (server.url.includes('/verified/')) {
+          try {
+            const dlRes = await fetch(server.url, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': finalUrl
+              },
+              redirect: 'manual'
+            });
+            const location = dlRes.headers.get('location');
+            if (location) {
+              const u = new URL(location, origin);
+              u.protocol = 'https:';
+              u.host = 'www.filmyzilla67.com';
+              return { ...server, url: u.toString() };
+            }
+          } catch (e) {
+            // Keep original if error
+          }
+        }
+        return server;
+      })
+    );
+
     return NextResponse.json({
       success: true,
       fileName,
       fileSize,
-      servers,
+      servers: resolvedServers,
       originalUrl: targetUrl
     });
 
