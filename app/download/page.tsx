@@ -69,6 +69,7 @@ function DownloadContent() {
   const [remainingTime, setRemainingTime] = useState("00:45");
   const [isDownloadPaused, setIsDownloadPaused] = useState(false);
   const [isDownloadComplete, setIsDownloadComplete] = useState(false);
+  const [iframeLoadCount, setIframeLoadCount] = useState(0);
 
   // Player state
   const [streamEngine, setStreamEngine] = useState<"hd" | "direct">("hd");
@@ -151,6 +152,28 @@ function DownloadContent() {
     } catch (e) {
       return urlStr.replace(/https?:\/\/(?:www\.)+filmyzilla\d*\.com/g, "https://www.filmyzilla67.com");
     }
+  };
+
+  // Helper: Direct non-expiring Filmyzilla verification URL (fixes Cloudflare domain mismatch on hosted websites)
+  const getDirectVerifyUrl = (urlStr: string, srvIdx: number = 0): string => {
+    if (!urlStr) return "";
+    let clean = normalizeDomain(urlStr);
+
+    const dlMatch = clean.match(/\/dl\/(\d+)\/(server_\d+)\//i);
+    if (dlMatch) {
+      return `https://www.filmyzilla67.com/verified/${dlMatch[1]}/${dlMatch[2]}/`;
+    }
+
+    if (clean.includes('/verified/')) {
+      return clean;
+    }
+
+    const serverMatch = clean.match(/\/server\/(\d+)\//i);
+    if (serverMatch) {
+      return `https://www.filmyzilla67.com/verified/${serverMatch[1]}/server_${srvIdx + 1}/`;
+    }
+
+    return clean;
   };
 
   // Helper: Record download into localStorage
@@ -669,8 +692,8 @@ function DownloadContent() {
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
                     onClick={() => {
-                      const url = normalizeDomain(activeVerifyUrl || targetUrl);
-                      window.open(url, "_blank");
+                      const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
+                      window.open(directUrl, "_blank");
                     }}
                     className="text-gray-400 hover:text-[#2563eb] p-1 transition-colors cursor-pointer"
                     title="Open in new tab"
@@ -680,7 +703,9 @@ function DownloadContent() {
                   <button
                     onClick={() => {
                       if (verifyIframeRef.current) {
-                        verifyIframeRef.current.src = `/api/proxy-server?url=${encodeURIComponent(activeVerifyUrl || targetUrl)}&t=${Date.now()}`;
+                        const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
+                        setIframeLoadCount(0);
+                        verifyIframeRef.current.src = `${directUrl}?t=${Date.now()}`;
                       }
                     }}
                     className="text-gray-400 hover:text-gray-700 p-1 transition-colors cursor-pointer"
@@ -691,13 +716,27 @@ function DownloadContent() {
                 </div>
               </div>
 
-              {/* Embedded Frame */}
+              {/* Embedded Direct Filmyzilla Frame */}
               <iframe
-                key={activeVerifyUrl || targetUrl}
+                key={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
                 ref={verifyIframeRef}
-                src={`/api/proxy-server?url=${encodeURIComponent(activeVerifyUrl || targetUrl)}`}
+                src={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
+                onLoad={() => {
+                  setIframeLoadCount((prev) => {
+                    const next = prev + 1;
+                    if (next > 1) {
+                      setDownloadProgress(2);
+                      setDownloadedMB(0.8);
+                      setIsDownloadPaused(false);
+                      setIsDownloadComplete(false);
+                      setScreen("progress");
+                    }
+                    return next;
+                  });
+                }}
                 className="w-full h-[540px] border-0 bg-white"
                 title="Verify You're Human"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; downloads"
               />
             </div>
 

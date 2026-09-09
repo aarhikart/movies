@@ -12,6 +12,19 @@ export async function GET(request: Request) {
 
     let cleanUrl = targetUrl.replace(/https?:\/\/(?:www\.)+filmyzilla\d*\.com/g, 'https://www.filmyzilla67.com');
 
+    // Cloudflare Turnstile Domain Fix for Hosted Websites:
+    // Turnstile sitekey 0x4AAAAAAEtAwHhA8H6PiX2N is bound to "filmyzilla67.com".
+    // When proxied through a hosted domain (e.g. *.vercel.app or custom domain),
+    // Cloudflare rejects Turnstile with "Unable to connect to website".
+    // Redirect directly to the authorized Filmyzilla domain so Turnstile executes properly!
+    if (cleanUrl.includes('/dl/') || cleanUrl.includes('/verified/')) {
+      const dlMatch = cleanUrl.match(/\/dl\/(\d+)\/(server_\d+)\//i);
+      const targetVerifyUrl = dlMatch
+        ? `https://www.filmyzilla67.com/verified/${dlMatch[1]}/${dlMatch[2]}/`
+        : cleanUrl.replace('/dl/', '/verified/');
+      return NextResponse.redirect(targetVerifyUrl, 302);
+    }
+
     const res = await fetch(cleanUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

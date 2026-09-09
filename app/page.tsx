@@ -398,7 +398,7 @@ export default function Page() {
               )}
             </div>
           </div>
-<h1>hitesh</h1>
+
           {/* Filter Chips */}
           <div className="flex gap-2 mt-4 overflow-x-auto hide-scrollbar -mx-5 px-5 pb-1">
             {chips.map((chip) => {
