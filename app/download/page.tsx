@@ -191,8 +191,9 @@ function DownloadContent() {
   // Helper: Trigger native download
   const triggerNativeDownload = (rawUrl?: string) => {
     const downloadTarget = rawUrl || selectedServer.url || targetUrl;
-    // Canonicalize domain to prevent 404s and duplicate www
-    const activeUrl = normalizeDomain(downloadTarget);
+    // Resolve to direct verification/download link if applicable
+    const resolvedUrl = getDirectVerifyUrl(downloadTarget, selectedServerIndex);
+    const activeUrl = normalizeDomain(resolvedUrl || downloadTarget);
 
     // Save download in localStorage for persistent offline tracking
     recordThisDownload(activeUrl);
@@ -643,130 +644,122 @@ function DownloadContent() {
         {/* ========================================================
             SCREEN 2: “VERIFY YOU'RE HUMAN” SCREEN (When Verification Required)
            ======================================================== */}
-        {screen === "verify" && (
-          <div className="flex flex-col flex-1 animate-in fade-in duration-200">
-            {/* Top Verification Header */}
-            <div className="text-center mt-1 mb-3">
-              <div className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 text-blue-800 text-[11px] font-bold px-3 py-1 rounded-full mb-2 shadow-2xs">
-                <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                <span>Security Check Required</span>
-              </div>
-              <h2 className="text-[19px] font-black text-gray-900 tracking-tight leading-tight mb-1">
-                Verify You're Human
-              </h2>
-              <p className="text-[12px] text-gray-500 truncate px-3">
-                {displayName}
-              </p>
+        {/* ========================================================
+            SCREEN 2: “VERIFY YOU'RE HUMAN” SCREEN (When Verification Required)
+           ======================================================== */}
+        <div className={screen === "verify" ? "flex flex-col flex-1 animate-in fade-in duration-200" : "hidden"}>
+          {/* Top Verification Header */}
+          <div className="text-center mt-1 mb-3">
+            <div className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 text-blue-800 text-[11px] font-bold px-3 py-1 rounded-full mb-2 shadow-2xs">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+              <span>Security Check Required</span>
             </div>
-
-            {/* Server Selector Bar if multiple servers */}
-            {currentServers.length > 1 && (
-              <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 hide-scrollbar">
-                {currentServers.map((srv, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      setSelectedServerIndex(idx);
-                      setActiveVerifyUrl(srv.url);
-                    }}
-                    className={`text-[11px] font-bold px-3 py-1.5 rounded-xl whitespace-nowrap transition-all cursor-pointer ${
-                      selectedServerIndex === idx
-                        ? "bg-[#2563eb] text-white shadow-xs"
-                        : "bg-[#f1f3f7] text-gray-600 hover:bg-gray-200"
-                    }`}
-                  >
-                    Server {idx + 1}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Embedded Real Filmyzilla "Verify You're Human" Card */}
-            <div className="bg-[#f9fafc] border border-gray-200 rounded-[22px] overflow-hidden shadow-md flex flex-col mb-4">
-              {/* Frame Header */}
-              <div className="bg-white px-4 py-2.5 border-b border-gray-200 flex items-center justify-between text-[11px] font-bold text-gray-700">
-                <div className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-600" />
-                  <span className="truncate">Cloudflare Verification Box</span>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => {
-                      const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
-                      window.open(directUrl, "_blank");
-                    }}
-                    className="text-gray-400 hover:text-[#2563eb] p-1 transition-colors cursor-pointer"
-                    title="Open in new tab"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (verifyIframeRef.current) {
-                        const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
-                        setIframeLoadCount(0);
-                        verifyIframeRef.current.src = `${directUrl}?t=${Date.now()}`;
-                      }
-                    }}
-                    className="text-gray-400 hover:text-gray-700 p-1 transition-colors cursor-pointer"
-                    title="Reload verification"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Embedded Direct Filmyzilla Frame */}
-              <iframe
-                key={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
-                ref={verifyIframeRef}
-                src={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
-                onLoad={() => {
-                  setIframeLoadCount((prev) => {
-                    const next = prev + 1;
-                    if (next > 1) {
-                      setDownloadProgress(2);
-                      setDownloadedMB(0.8);
-                      setIsDownloadPaused(false);
-                      setIsDownloadComplete(false);
-                      setScreen("progress");
-                    }
-                    return next;
-                  });
-                }}
-                className="w-full h-[540px] border-0 bg-white"
-                title="Verify You're Human"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; downloads"
-              />
-            </div>
-
-            {/* Actions below the card */}
-            <div className="mt-auto space-y-2">
-              {/* Preserved button (hidden per user request) */}
-              <button
-                onClick={() => {
-                  triggerNativeDownload(activeVerifyUrl || targetUrl);
-                  setDownloadProgress(2);
-                  setDownloadedMB(0.8);
-                  setIsDownloadPaused(false);
-                  setIsDownloadComplete(false);
-                  setScreen("progress");
-                }}
-                className="hidden w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-105 active:scale-[0.98] text-white py-3.5 px-5 rounded-[18px] font-bold text-[13px] shadow-md transition-all items-center justify-center gap-2 cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>I Clicked Continue Download • Start Movie Download</span>
-              </button>
-
-              <button
-                onClick={() => setScreen("servers")}
-                className="w-full py-2 text-center text-gray-500 hover:text-gray-800 text-[12px] font-semibold transition-colors cursor-pointer"
-              >
-                ← Back to Server List
-              </button>
-            </div>
+            <h2 className="text-[19px] font-black text-gray-900 tracking-tight leading-tight mb-1">
+              Verify You're Human
+            </h2>
+            <p className="text-[12px] text-gray-500 truncate px-3">
+              {displayName}
+            </p>
           </div>
-        )}
+
+          {/* Server Selector Bar if multiple servers */}
+          {currentServers.length > 1 && (
+            <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 hide-scrollbar">
+              {currentServers.map((srv, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setSelectedServerIndex(idx);
+                    setActiveVerifyUrl(srv.url);
+                  }}
+                  className={`text-[11px] font-bold px-3 py-1.5 rounded-xl whitespace-nowrap transition-all cursor-pointer ${
+                    selectedServerIndex === idx
+                      ? "bg-[#2563eb] text-white shadow-xs"
+                      : "bg-[#f1f3f7] text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  Server {idx + 1}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Embedded Real Filmyzilla "Verify You're Human" Card */}
+          <div className="bg-[#f9fafc] border border-gray-200 rounded-[22px] overflow-hidden shadow-md flex flex-col mb-4">
+            {/* Frame Header */}
+            <div className="bg-white px-4 py-2.5 border-b border-gray-200 flex items-center justify-between text-[11px] font-bold text-gray-700">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-blue-600" />
+                <span className="truncate">Cloudflare Verification Box</span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => {
+                    const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
+                    window.open(directUrl, "_blank");
+                  }}
+                  className="text-gray-400 hover:text-[#2563eb] p-1 transition-colors cursor-pointer"
+                  title="Open in new tab"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (verifyIframeRef.current) {
+                      const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
+                      verifyIframeRef.current.src = `${directUrl}?t=${Date.now()}`;
+                    }
+                  }}
+                  className="text-gray-400 hover:text-gray-700 p-1 transition-colors cursor-pointer"
+                  title="Reload verification"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Embedded Direct Filmyzilla Frame */}
+            <iframe
+              key={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
+              ref={verifyIframeRef}
+              src={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
+              className="w-full h-[540px] border-0 bg-white"
+              title="Verify You're Human"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; downloads"
+              sandbox="allow-downloads allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+            />
+          </div>
+
+          {/* Actions below the card */}
+          <div className="mt-auto space-y-2.5">
+            {/* Direct Start Movie Download button */}
+            <button
+              onClick={() => {
+                const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
+                triggerNativeDownload(directUrl);
+                setDownloadProgress(2);
+                setDownloadedMB(0.8);
+                setIsDownloadPaused(false);
+                setIsDownloadComplete(false);
+                setScreen("progress");
+              }}
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-105 active:scale-[0.98] text-white py-3.5 px-5 rounded-[18px] font-bold text-[14px] shadow-[0_4px_16px_rgba(37,99,235,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Start Movie Download</span>
+            </button>
+            <p className="text-[11px] text-gray-400 text-center px-2">
+              If download does not start inside the box above, tap <b>Start Movie Download</b>
+            </p>
+
+            <button
+              onClick={() => setScreen("servers")}
+              className="w-full py-2 text-center text-gray-500 hover:text-gray-800 text-[12px] font-semibold transition-colors cursor-pointer"
+            >
+              ← Back to Server List
+            </button>
+          </div>
+        </div>
 
         {/* ========================================================
             SCREEN 2: “DOWNLOAD STARTED” SCREEN (With Live Progress)
