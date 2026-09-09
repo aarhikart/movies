@@ -466,7 +466,7 @@ function DownloadContent() {
         <Link href="/" className="flex items-center justify-center">
           <div className="relative h-8 w-28">
             <Image
-              src="/logo.png"
+              src="/logoh.png"
               alt="Logo"
               fill
               className="object-contain"

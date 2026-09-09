@@ -57,3 +57,19 @@ body {
 .glow-purple {
   animation: pulseGlow 3s infinite ease-in-out;
 }
+
+/* Classic Animated Shining Line Border */
+@keyframes borderBeam {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+.animate-shining-border {
+  animation: borderBeam 4.5s linear infinite;
+  will-change: transform;
+}
+

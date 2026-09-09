@@ -282,7 +282,7 @@ export default function Page() {
       {viewingCategory ? (
         // Category Detail View ("See All")
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          <div className="flex items-center px-5 py-3.5 border-b border-purple-50 bg-white/95 backdrop-blur-md z-10 sticky top-0">
+          <div className="flex items-center px-5 py-3.5 border-b border-purple-100/70 bg-white z-10 sticky top-0 shadow-[0_2px_12px_rgba(85,60,251,0.04)]">
             <button 
               onClick={() => setViewingCategory(null)} 
               className="mr-3 p-1.5 rounded-full bg-[#f8f9fe] hover:bg-purple-100/60 text-gray-700 hover:text-[#553cfb] transition-colors cursor-pointer"
@@ -337,10 +337,10 @@ export default function Page() {
         </div>
       ) : (
         // Main Dashboard with High Performance Sticky Search Bar
-        <div className="flex-1 overflow-y-auto px-5 pt-3 pb-12 hide-scrollbar overscroll-y-contain transform-gpu [will-change:scroll-position]">
+        <div className="flex-1 overflow-y-auto px-5 pt-0 pb-12 hide-scrollbar overscroll-y-contain transform-gpu [will-change:scroll-position]">
           
           {/* Top Brand Logo Header with Live Views Counter */}
-          <div className="flex items-center justify-between pt-1 pb-3 px-0.5">
+          <div className="flex items-center justify-between pt-3 pb-2.5 px-0.5">
             <div className="relative h-9 w-32">
               <Image
                 src="/logoh.png"
@@ -363,32 +363,56 @@ export default function Page() {
             </div>
           </div>
 
-          {/* STICKY SEARCH BAR - GPU Accelerated, Clean Solid Background (Zero Scroll Stutter) */}
-          <div className="sticky top-0 z-30 bg-white/98 transform-gpu pt-2 pb-3 -mx-5 px-5 border-b border-purple-50/80 shadow-[0_4px_16px_rgba(85,60,251,0.04)]">
+          {/* STICKY SEARCH BAR PARENT - 100% Solid White Background from Top 0 (Zero Bleed-Through) */}
+          <div className="sticky top-0 z-30 bg-white transform-gpu pt-2 pb-3 -mx-5 px-5 border-b border-purple-100/70 shadow-[0_4px_20px_rgba(85,60,251,0.05)]">
             <div className="relative">
-              <div className="flex items-center bg-[#f8f9fe] hover:bg-[#f2f4fd] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#553cfb]/25 focus-within:border-[#553cfb] border border-purple-100/90 rounded-full px-4 py-2.5 shadow-[0_2px_12px_rgba(85,60,251,0.05)] transition-all">
-                <Search className="text-[#553cfb] w-4 h-4 mr-2.5 flex-shrink-0" />
-                <input
-                  type="text"
-                  placeholder="Search movies, series, actors..."
-                  className="bg-transparent flex-1 outline-none text-[13.5px] font-medium placeholder:text-gray-400 text-gray-800"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+              {/* Classy Animated Shining Line Border Container */}
+              <div className="relative rounded-full p-[1.5px] overflow-hidden isolate group shadow-[0_2px_14px_rgba(85,60,251,0.06)] hover:shadow-[0_4px_22px_rgba(85,60,251,0.12)] focus-within:shadow-[0_4px_24px_rgba(85,60,251,0.16)] transition-all duration-300">
+                {/* Static elegant base border track */}
+                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-200/90 via-purple-100/60 to-purple-200/90" />
+
+                {/* Animated Shining Line Beam (Smooth Conic Gradient Sweep) */}
+                <div 
+                  className="absolute left-1/2 top-1/2 w-[700px] h-[700px] animate-shining-border pointer-events-none"
+                  style={{
+                    background: "conic-gradient(from 0deg, transparent 0deg, transparent 270deg, rgba(85,60,251,0.2) 295deg, #553cfb 320deg, #9333ea 342deg, #ffffff 357deg, #553cfb 360deg)",
+                  }}
                 />
-                {searchQuery && (
-                  <button 
-                    onClick={() => setSearchQuery("")}
-                    className="w-5 h-5 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-300 transition-colors mr-1.5 cursor-pointer"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-                <div className="w-px h-4 bg-purple-200/60 mx-2 flex-shrink-0"></div>
-                {isSearching ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#553cfb] border-t-transparent flex-shrink-0"></div>
-                ) : (
-                  <Mic className="text-gray-400 hover:text-[#553cfb] w-4 h-4 flex-shrink-0 cursor-pointer transition-colors" />
-                )}
+
+                {/* Glowing Aura Blur behind Shining Line */}
+                <div 
+                  className="absolute left-1/2 top-1/2 w-[700px] h-[700px] animate-shining-border pointer-events-none blur-[4px] opacity-70"
+                  style={{
+                    background: "conic-gradient(from 0deg, transparent 0deg, transparent 270deg, #553cfb 320deg, #9333ea 342deg, #ffffff 357deg, #553cfb 360deg)",
+                  }}
+                />
+
+                {/* Inner Search Bar Body (Crisp White with Classy Accent) */}
+                <div className="relative flex items-center bg-white hover:bg-[#fafbff] focus-within:bg-white rounded-full px-4 py-2.5 transition-all">
+                  <Search className="text-[#553cfb] w-4 h-4 mr-2.5 flex-shrink-0 transition-transform group-focus-within:scale-110" />
+                  <input
+                    type="text"
+                    placeholder="Search movies, series, actors..."
+                    className="bg-transparent flex-1 outline-none text-[13.5px] font-medium placeholder:text-gray-400 text-gray-800"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button 
+                      onClick={() => setSearchQuery("")}
+                      className="w-5 h-5 rounded-full bg-purple-50 text-gray-500 flex items-center justify-center hover:bg-purple-100 hover:text-gray-800 transition-colors mr-1.5 cursor-pointer"
+                      aria-label="Clear search"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                  <div className="w-px h-4 bg-purple-200/70 mx-2 flex-shrink-0"></div>
+                  {isSearching ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#553cfb] border-t-transparent flex-shrink-0"></div>
+                  ) : (
+                    <Mic className="text-gray-400 hover:text-[#553cfb] w-4 h-4 flex-shrink-0 cursor-pointer transition-colors" />
+                  )}
+                </div>
               </div>
 
               {/* Floating Search Suggestions Dropdown */}
@@ -871,11 +895,11 @@ export default function Page() {
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="relative w-9 h-9 rounded-xl overflow-hidden bg-white p-1 flex-shrink-0 shadow-md">
-                <Image src="/logo.png" alt="MovieMela" fill className="object-contain" />
+                <Image src="/apk.png" alt="MovieMela" fill className="object-contain" />
               </div>
               <div className="min-w-0">
                 <h4 className="text-[13px] font-bold text-white leading-tight truncate">Install MovieMela</h4>
-                <p className="text-[11px] text-gray-300 truncate">Quick access from home screen</p>
+                <p className="text-[11px] text-gray-300 truncate">Quick access from home screen 10kb</p>
               </div>
             </div>
 
