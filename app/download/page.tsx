@@ -162,16 +162,13 @@ function DownloadContent() {
     }
   };
 
-  // Helper: Direct non-expiring Filmyzilla verification URL (fixes Cloudflare domain mismatch on hosted websites)
+  // Helper: Canonical non-expiring Filmyzilla verification URL (prevents "Invalid token" or "Token expired" errors)
   const getDirectVerifyUrl = (urlStr: string, srvIdx: number = 0): string => {
     if (!urlStr) return "";
     let clean = normalizeDomain(urlStr);
 
-    // If clean ALREADY has ?token=, preserve it directly!
-    if (clean.includes('/dl/') && clean.includes('token=')) {
-      return clean;
-    }
-
+    // If it's a /dl/ URL (even with a stale/expired token), always convert to canonical /verified/
+    // so Filmyzilla generates a fresh token directly for the user's browser session!
     const dlMatch = clean.match(/\/dl\/(\d+)\/(server_\d+)\//i);
     if (dlMatch) {
       return `https://www.filmyzilla67.com/verified/${dlMatch[1]}/${dlMatch[2]}/`;

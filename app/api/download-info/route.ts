@@ -119,38 +119,27 @@ export async function GET(request: Request) {
       });
     });
 
-    // Resolve any /verified/ server links to their direct /dl/?token=... URLs
-    const resolvedServers = await Promise.all(
-      servers.map(async (server) => {
-        if (server.url.includes('/verified/')) {
-          try {
-            const dlRes = await fetch(server.url, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': finalUrl
-              },
-              redirect: 'manual'
-            });
-            const location = dlRes.headers.get('location');
-            if (location) {
-              const u = new URL(location, origin);
-              u.protocol = 'https:';
-              u.host = 'www.filmyzilla67.com';
-              return { ...server, url: u.toString() };
-            }
-          } catch (e) {
-            // Keep original if error
-          }
-        }
-        return server;
-      })
-    );
+    // Ensure all servers use canonical, non-expiring /verified/<id>/server_<num>/ URLs.
+    // NEVER pre-resolve tokens on the server because Filmyzilla tokens expire within seconds
+    // and are bound to the client's IP and session.
+    const cleanServers = servers.map((server, idx) => {
+      let u = server.url;
+      const dlMatch = u.match(/\/dl\/(\d+)\/(server_\d+)\//i);
+      if (dlMatch) {
+        return { ...server, url: `https://www.filmyzilla67.com/verified/${dlMatch[1]}/${dlMatch[2]}/` };
+      }
+      const srvMatch = u.match(/\/server\/(\d+)\//i);
+      if (srvMatch) {
+        return { ...server, url: `https://www.filmyzilla67.com/verified/${srvMatch[1]}/server_${idx + 1}/` };
+      }
+      return server;
+    });
 
     return NextResponse.json({
       success: true,
       fileName,
       fileSize,
-      servers: resolvedServers,
+      servers: cleanServers,
       originalUrl: targetUrl
     });
 
