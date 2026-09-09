@@ -21,7 +21,9 @@ import {
   ExternalLink,
   RefreshCw,
   Layers,
-  Globe
+  Globe,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { saveDownloadedMovie } from "@/lib/downloads";
 
@@ -61,6 +63,12 @@ function DownloadContent() {
   // Server view toggle: ONLY 2 tabs: "buttons" (MovieMela list) or "page" (Original Server Page)
   const [serverViewTab, setServerViewTab] = useState<ServerViewTab>("buttons");
   const [activeVerifyUrl, setActiveVerifyUrl] = useState<string>(targetUrl);
+
+  // Verification tab & detection state
+  const [waitingForDownload, setWaitingForDownload] = useState(false);
+  const [showEmbeddedBox, setShowEmbeddedBox] = useState(false);
+  const openedTabRef = useRef<Window | null>(null);
+  const tabOpenTimeRef = useRef<number>(0);
 
   // Live download progress state
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -159,6 +167,11 @@ function DownloadContent() {
     if (!urlStr) return "";
     let clean = normalizeDomain(urlStr);
 
+    // If clean ALREADY has ?token=, preserve it directly!
+    if (clean.includes('/dl/') && clean.includes('token=')) {
+      return clean;
+    }
+
     const dlMatch = clean.match(/\/dl\/(\d+)\/(server_\d+)\//i);
     if (dlMatch) {
       return `https://www.filmyzilla67.com/verified/${dlMatch[1]}/${dlMatch[2]}/`;
@@ -215,6 +228,89 @@ function DownloadContent() {
     }
   };
 
+  // Start live progress screen, speed ticker, and persist download in localStorage
+  const startDownloadProgress = (urlToSave?: string) => {
+    setWaitingForDownload(false);
+    recordThisDownload(urlToSave || activeVerifyUrl || targetUrl);
+    setDownloadProgress((prev) => (prev > 0 ? prev : 2));
+    setDownloadedMB((prev) => (prev > 0 ? prev : 0.8));
+    setIsDownloadPaused(false);
+    setIsDownloadComplete(false);
+    setScreen("progress");
+  };
+
+  // Open direct verification/download link in a browser tab
+  const openDownloadInTab = (rawUrl?: string) => {
+    const target = rawUrl || activeVerifyUrl || selectedServer.url || targetUrl;
+    const directUrl = getDirectVerifyUrl(target, selectedServerIndex);
+    const finalUrl = normalizeDomain(directUrl || target);
+
+    setActiveVerifyUrl(finalUrl);
+    setWaitingForDownload(true);
+    tabOpenTimeRef.current = Date.now();
+
+    try {
+      const win = window.open(finalUrl, "_blank");
+      if (win) {
+        openedTabRef.current = win;
+      }
+    } catch (e) {
+      console.warn("window.open blocked:", e);
+      const a = document.createElement("a");
+      a.href = finalUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+      }, 500);
+    }
+  };
+
+  // Auto-detect when user completes verification in the opened tab and returns to MovieMela
+  useEffect(() => {
+    if (!waitingForDownload) return;
+
+    const handleReturnToTab = () => {
+      if (!waitingForDownload) return;
+      const elapsed = Date.now() - tabOpenTimeRef.current;
+      // Wait at least 2.5s so we don't trigger immediately when opening the tab
+      if (elapsed > 2500) {
+        startDownloadProgress();
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleReturnToTab();
+      }
+    };
+
+    window.addEventListener("focus", handleReturnToTab);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    // Also poll if opened tab was closed
+    const pollInterval = setInterval(() => {
+      try {
+        if (openedTabRef.current && openedTabRef.current.closed) {
+          const elapsed = Date.now() - tabOpenTimeRef.current;
+          if (elapsed > 1500) {
+            startDownloadProgress();
+          }
+        }
+      } catch (e) {
+        // Safe ignore
+      }
+    }, 800);
+
+    return () => {
+      window.removeEventListener("focus", handleReturnToTab);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(pollInterval);
+    };
+  }, [waitingForDownload, activeVerifyUrl, targetUrl]);
+
   // Sync active verify URL when selected server changes or download data loads
   useEffect(() => {
     if (currentServers[selectedServerIndex]?.url) {
@@ -242,15 +338,12 @@ function DownloadContent() {
             }
           }
 
-          if (selectedUrl.includes('/dl/') || selectedUrl.includes('/verified/')) {
+          if (selectedUrl.includes('/dl/') || selectedUrl.includes('/verified/') || selectedUrl.includes('/server/')) {
             setScreen("verify");
+            openDownloadInTab(selectedUrl);
           } else {
             triggerNativeDownload(selectedUrl);
-            setDownloadProgress(2);
-            setDownloadedMB(0.8);
-            setIsDownloadPaused(false);
-            setIsDownloadComplete(false);
-            setScreen("progress");
+            startDownloadProgress(selectedUrl);
           }
         }
         if (e.data.type === "DOWNLOAD_TRIGGER" || e.data.type === "SERVER_CLICKED") {
@@ -258,11 +351,7 @@ function DownloadContent() {
           if (urlToDownload) {
             triggerNativeDownload(urlToDownload);
           }
-          setDownloadProgress(2);
-          setDownloadedMB(0.8);
-          setIsDownloadPaused(false);
-          setIsDownloadComplete(false);
-          setScreen("progress");
+          startDownloadProgress(urlToDownload);
         }
       }
     };
@@ -270,23 +359,19 @@ function DownloadContent() {
     return () => window.removeEventListener("message", handleMessage);
   }, [selectedServer, currentServers, targetUrl]);
 
-  // Direct server button click: if requires verification, open "verify" screen; else start download
+  // Direct server button click: if requires verification, open in tab & wait for detection; else start download
   const handleServerClick = (serverUrl: string, idx: number) => {
     setSelectedServerIndex(idx);
     setActiveVerifyUrl(serverUrl);
     setActiveVideoSrc(`/api/stream?url=${encodeURIComponent(serverUrl)}`);
 
-    if (serverUrl.includes('/dl/') || serverUrl.includes('/verified/')) {
-      // Server requires Cloudflare Turnstile verification
+    const isVerify = serverUrl.includes('/dl/') || serverUrl.includes('/verified/') || serverUrl.includes('/server/');
+    if (isVerify) {
       setScreen("verify");
+      openDownloadInTab(serverUrl);
     } else {
-      // Direct file download without verification
       triggerNativeDownload(serverUrl);
-      setDownloadProgress(2);
-      setDownloadedMB(0.8);
-      setIsDownloadPaused(false);
-      setIsDownloadComplete(false);
-      setScreen("progress");
+      startDownloadProgress(serverUrl);
     }
   };
 
@@ -296,15 +381,13 @@ function DownloadContent() {
     setActiveVerifyUrl(activeUrl);
     setActiveVideoSrc(`/api/stream?url=${encodeURIComponent(activeUrl)}`);
 
-    if (activeUrl.includes('/dl/') || activeUrl.includes('/verified/')) {
+    const isVerify = activeUrl.includes('/dl/') || activeUrl.includes('/verified/') || activeUrl.includes('/server/');
+    if (isVerify) {
       setScreen("verify");
+      openDownloadInTab(activeUrl);
     } else {
       triggerNativeDownload(activeUrl);
-      setDownloadProgress(2);
-      setDownloadedMB(0.8);
-      setIsDownloadPaused(false);
-      setIsDownloadComplete(false);
-      setScreen("progress");
+      startDownloadProgress(activeUrl);
     }
   };
 
@@ -644,15 +727,12 @@ function DownloadContent() {
         {/* ========================================================
             SCREEN 2: “VERIFY YOU'RE HUMAN” SCREEN (When Verification Required)
            ======================================================== */}
-        {/* ========================================================
-            SCREEN 2: “VERIFY YOU'RE HUMAN” SCREEN (When Verification Required)
-           ======================================================== */}
         <div className={screen === "verify" ? "flex flex-col flex-1 animate-in fade-in duration-200" : "hidden"}>
           {/* Top Verification Header */}
           <div className="text-center mt-1 mb-3">
             <div className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 text-blue-800 text-[11px] font-bold px-3 py-1 rounded-full mb-2 shadow-2xs">
               <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-              <span>Security Check Required</span>
+              <span>Cloudflare Security Verification</span>
             </div>
             <h2 className="text-[19px] font-black text-gray-900 tracking-tight leading-tight mb-1">
               Verify You're Human
@@ -664,13 +744,14 @@ function DownloadContent() {
 
           {/* Server Selector Bar if multiple servers */}
           {currentServers.length > 1 && (
-            <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 hide-scrollbar">
+            <div className="flex gap-1.5 mb-3.5 overflow-x-auto pb-1 hide-scrollbar">
               {currentServers.map((srv, idx) => (
                 <button
                   key={idx}
                   onClick={() => {
                     setSelectedServerIndex(idx);
                     setActiveVerifyUrl(srv.url);
+                    openDownloadInTab(srv.url);
                   }}
                   className={`text-[11px] font-bold px-3 py-1.5 rounded-xl whitespace-nowrap transition-all cursor-pointer ${
                     selectedServerIndex === idx
@@ -684,74 +765,130 @@ function DownloadContent() {
             </div>
           )}
 
-          {/* Embedded Real Filmyzilla "Verify You're Human" Card */}
-          <div className="bg-[#f9fafc] border border-gray-200 rounded-[22px] overflow-hidden shadow-md flex flex-col mb-4">
-            {/* Frame Header */}
-            <div className="bg-white px-4 py-2.5 border-b border-gray-200 flex items-center justify-between text-[11px] font-bold text-gray-700">
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-blue-600" />
-                <span className="truncate">Cloudflare Verification Box</span>
+          {/* Tab Verification & Auto-Detection Status Card */}
+          <div className="bg-gradient-to-br from-[#f8faff] via-white to-[#f0f4ff] border-2 border-blue-200 rounded-[24px] p-4.5 mb-4 shadow-sm">
+            {/* Live Detection Radar / Pulse */}
+            <div className="flex items-center justify-between mb-3 pb-3 border-b border-blue-100">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-600"></span>
+                </span>
+                <span className="text-[12px] font-extrabold text-blue-900">
+                  {waitingForDownload ? "Waiting for Verification in Tab..." : "Verification Ready in Tab"}
+                </span>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => {
-                    const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
-                    window.open(directUrl, "_blank");
-                  }}
-                  className="text-gray-400 hover:text-[#2563eb] p-1 transition-colors cursor-pointer"
-                  title="Open in new tab"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => {
-                    if (verifyIframeRef.current) {
-                      const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
-                      verifyIframeRef.current.src = `${directUrl}?t=${Date.now()}`;
-                    }
-                  }}
-                  className="text-gray-400 hover:text-gray-700 p-1 transition-colors cursor-pointer"
-                  title="Reload verification"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+
+              <span className="text-[10px] font-bold bg-blue-100/80 text-blue-700 px-2.5 py-0.5 rounded-full">
+                ⚡ Auto-Detecting
+              </span>
+            </div>
+
+            {/* Quick 3-step Instructions */}
+            <div className="space-y-2.5 mb-4 text-[12px] text-gray-700">
+              <div className="flex items-start gap-2.5">
+                <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-black text-[11px] flex items-center justify-center flex-shrink-0 mt-0.5">
+                  1
+                </div>
+                <p className="leading-snug">
+                  Complete the <b>Cloudflare Turnstile</b> checkbox in the opened browser tab.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-black text-[11px] flex items-center justify-center flex-shrink-0 mt-0.5">
+                  2
+                </div>
+                <p className="leading-snug">
+                  Click <b>"Continue Download"</b> in that tab to start downloading the movie file.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-black text-[11px] flex items-center justify-center flex-shrink-0 mt-0.5">
+                  3
+                </div>
+                <p className="leading-snug">
+                  <b>Switch back here</b> — MovieMela will automatically detect and show live download speed & progress!
+                </p>
               </div>
             </div>
 
-            {/* Embedded Direct Filmyzilla Frame */}
-            <iframe
-              key={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
-              ref={verifyIframeRef}
-              src={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
-              className="w-full h-[540px] border-0 bg-white"
-              title="Verify You're Human"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; downloads"
-              sandbox="allow-downloads allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
-            />
+            {/* Main Action Buttons */}
+            <div className="space-y-2">
+              <button
+                onClick={() => startDownloadProgress()}
+                className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-green-600 hover:brightness-105 active:scale-[0.98] text-white py-3.5 px-4 rounded-[18px] font-extrabold text-[13px] shadow-[0_4px_16px_rgba(16,185,129,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>✓ I Clicked Continue Download • View Live Progress</span>
+              </button>
+
+              <button
+                onClick={() => openDownloadInTab()}
+                className="w-full bg-white hover:bg-gray-50 border border-blue-200 text-blue-600 active:scale-[0.98] py-2.5 px-4 rounded-[16px] font-bold text-[12px] shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>{waitingForDownload ? "Re-open Verification Tab ↗" : "Open Verification Tab ↗"}</span>
+              </button>
+            </div>
           </div>
 
-          {/* Actions below the card */}
-          <div className="mt-auto space-y-2.5">
-            {/* Direct Start Movie Download button */}
+          {/* Collapsible In-Page Fallback Verification Box */}
+          <div className="mb-4">
             <button
-              onClick={() => {
-                const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
-                triggerNativeDownload(directUrl);
-                setDownloadProgress(2);
-                setDownloadedMB(0.8);
-                setIsDownloadPaused(false);
-                setIsDownloadComplete(false);
-                setScreen("progress");
-              }}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-105 active:scale-[0.98] text-white py-3.5 px-5 rounded-[18px] font-bold text-[14px] shadow-[0_4px_16px_rgba(37,99,235,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer"
+              onClick={() => setShowEmbeddedBox(!showEmbeddedBox)}
+              className="w-full py-2 px-3 text-center text-gray-500 hover:text-gray-800 text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
             >
-              <Download className="w-4 h-4" />
-              <span>Start Movie Download</span>
+              <span>{showEmbeddedBox ? "Hide In-Page Verification Box" : "Having trouble? View In-Page Verification Box"}</span>
+              {showEmbeddedBox ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
-            <p className="text-[11px] text-gray-400 text-center px-2">
-              If download does not start inside the box above, tap <b>Start Movie Download</b>
-            </p>
 
+            {showEmbeddedBox && (
+              <div className="bg-[#f9fafc] border border-gray-200 rounded-[22px] overflow-hidden shadow-md flex flex-col mt-2 animate-in fade-in duration-200">
+                <div className="bg-white px-4 py-2.5 border-b border-gray-200 flex items-center justify-between text-[11px] font-bold text-gray-700">
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-blue-600" />
+                    <span className="truncate">Cloudflare Verification Box</span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => openDownloadInTab()}
+                      className="text-gray-400 hover:text-[#2563eb] p-1 transition-colors cursor-pointer"
+                      title="Open in new tab"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (verifyIframeRef.current) {
+                          const directUrl = getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex);
+                          verifyIframeRef.current.src = `${directUrl}${directUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+                        }
+                      }}
+                      className="text-gray-400 hover:text-gray-700 p-1 transition-colors cursor-pointer"
+                      title="Reload verification"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <iframe
+                  key={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
+                  ref={verifyIframeRef}
+                  src={getDirectVerifyUrl(activeVerifyUrl || targetUrl, selectedServerIndex)}
+                  className="w-full h-[520px] border-0 bg-white"
+                  title="Verify You're Human"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; downloads"
+                  sandbox="allow-downloads allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Return to servers button */}
+          <div className="mt-auto">
             <button
               onClick={() => setScreen("servers")}
               className="w-full py-2 text-center text-gray-500 hover:text-gray-800 text-[12px] font-semibold transition-colors cursor-pointer"
