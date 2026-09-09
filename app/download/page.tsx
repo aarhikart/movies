@@ -186,16 +186,32 @@ function DownloadContent() {
     return clean;
   };
 
-  // Helper: Record download into localStorage
+  const lastRecordedTimeRef = useRef<number>(0);
+
+  // Helper: Record download into localStorage and MongoDB Atlas (global admin tracking)
   const recordThisDownload = (rawUrl?: string) => {
-    saveDownloadedMovie({
+    const movieData = {
       id: targetUrl || String(Date.now()),
       title: movieTitle || displayName || cleanTitle || "Movie",
       image: movieImage || "",
       quality: quality || "HD",
       fileSize: displaySize || "298 MB",
       url: rawUrl || selectedServer.url || targetUrl,
-    });
+    };
+    saveDownloadedMovie(movieData);
+
+    // Debounce/deduplicate global download tracking within 5 seconds
+    const now = Date.now();
+    if (now - lastRecordedTimeRef.current > 5000) {
+      lastRecordedTimeRef.current = now;
+      fetch("/api/downloads/record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(movieData),
+      }).catch((e) => {
+        console.warn("Failed to record global download count:", e);
+      });
+    }
   };
 
   // Helper: Trigger native download

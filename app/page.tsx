@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, UIEvent } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Search, 
   Mic, 
@@ -75,6 +75,11 @@ export default function Page() {
   // Hamburger drawer and downloads tracking
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [downloadedList, setDownloadedList] = useState<DownloadedMovie[]>([]);
+
+  // Record visit in MongoDB Atlas (2-hour rolling session deduplication)
+  useEffect(() => {
+    fetch("/api/views", { method: "POST" }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     // Initial fetch from localStorage
@@ -182,17 +187,24 @@ export default function Page() {
       });
   }, [activeChip]);
 
-  // Infinite Scroll logic for All Movies
-  const loadMoreMovies = async () => {
+  // Infinite Scroll logic using IntersectionObserver (off main scroll thread)
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const loadMoreMovies = useCallback(async () => {
     if (isLoadingMore) return;
+    if (totalMovies > 0 && allMovies.length >= totalMovies) return;
     setIsLoadingMore(true);
     const nextPage = page + 1;
     const filterParam = activeChip === 'All' ? '' : `&filter=${encodeURIComponent(activeChip)}`;
     try {
       const res = await fetch(`/api/movies?page=${nextPage}&limit=20${filterParam}`);
       const data = await res.json();
-      if (data.data.length > 0) {
-        setAllMovies(prev => [...prev, ...data.data]);
+      if (data.data && data.data.length > 0) {
+        setAllMovies(prev => {
+          const existing = new Set(prev.map(m => m.id));
+          const newItems = data.data.filter((m: Movie) => !existing.has(m.id));
+          return [...prev, ...newItems];
+        });
         setPage(nextPage);
       }
     } catch (e) {
@@ -200,14 +212,24 @@ export default function Page() {
     } finally {
       setIsLoadingMore(false);
     }
-  };
+  }, [isLoadingMore, page, activeChip, totalMovies, allMovies.length]);
 
-  const handleScroll = (e: UIEvent<HTMLDivElement>) => {
-    const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
-    if (scrollHeight - scrollTop <= clientHeight + 150) {
-      loadMoreMovies();
-    }
-  };
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMore && (totalMovies === 0 || allMovies.length < totalMovies)) {
+          loadMoreMovies();
+        }
+      },
+      { threshold: 0.1, rootMargin: "300px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMoreMovies, isLoadingMore, allMovies.length, totalMovies]);
 
   // Debounced Search logic
   useEffect(() => {
@@ -273,7 +295,7 @@ export default function Page() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-5 py-4 hide-scrollbar">
+          <div className="flex-1 overflow-y-auto px-5 py-4 hide-scrollbar overscroll-y-contain transform-gpu">
             <div className="grid grid-cols-2 gap-3.5 pb-10">
               {viewingCategory.data.map((movie) => (
                 <div 
@@ -281,23 +303,25 @@ export default function Page() {
                   className="cursor-pointer flex flex-col group active:scale-[0.98] transition-transform" 
                   onClick={() => setSelectedMovie(movie)}
                 >
-                  <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_4px_16px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_8px_24px_rgba(85,60,251,0.18)] transition-all">
+                  <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
                     {movie.image && (
                       <Image 
                         src={movie.image} 
                         alt={movie.title} 
                         fill 
-                        className="object-cover group-hover:scale-105 transition-transform duration-500" 
+                        sizes="(max-width: 640px) 45vw, 200px"
+                        loading="lazy"
+                        className="object-cover group-hover:scale-105 transition-transform duration-300" 
                       />
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                     {movie.rating && (
-                      <div className="absolute top-2.5 right-2.5 bg-black/65 backdrop-blur-md text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/10">
+                      <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
                         <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
                       </div>
                     )}
                     {movie.quality && (
-                      <div className="absolute bottom-2 left-2 bg-[#553cfb]/90 backdrop-blur-sm text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md">
+                      <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
                         {movie.quality}
                       </div>
                     )}
@@ -312,10 +336,10 @@ export default function Page() {
           </div>
         </div>
       ) : (
-        // Main Dashboard with Sticky Search Bar
-        <div className="flex-1 overflow-y-auto px-5 pt-3 pb-12 hide-scrollbar scroll-smooth" onScroll={handleScroll}>
+        // Main Dashboard with High Performance Sticky Search Bar
+        <div className="flex-1 overflow-y-auto px-5 pt-3 pb-12 hide-scrollbar overscroll-y-contain transform-gpu [will-change:scroll-position]">
           
-          {/* Top Brand Logo Header */}
+          {/* Top Brand Logo Header with Live Views Counter */}
           <div className="flex items-center justify-between pt-1 pb-3 px-0.5">
             <div className="relative h-9 w-32">
               <Image
@@ -326,18 +350,21 @@ export default function Page() {
                 priority
               />
             </div>
-            <button
-              onClick={() => setIsDrawerOpen(true)}
-              className="w-9 h-9 rounded-full bg-[#f8f9fe] hover:bg-purple-100/60 border border-purple-100 flex items-center justify-center text-gray-700 hover:text-[#553cfb] transition-all cursor-pointer shadow-2xs active:scale-95"
-              aria-label="Open Navigation Menu"
-              title="Menu"
-            >
-              <Menu className="w-5 h-5 text-gray-700 hover:text-[#553cfb] transition-colors" />
-            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsDrawerOpen(true)}
+                className="w-9 h-9 rounded-full bg-[#f8f9fe] hover:bg-purple-100/60 border border-purple-100 flex items-center justify-center text-gray-700 hover:text-[#553cfb] transition-all cursor-pointer shadow-2xs active:scale-95"
+                aria-label="Open Navigation Menu"
+                title="Menu"
+              >
+                <Menu className="w-5 h-5 text-gray-700 hover:text-[#553cfb] transition-colors" />
+              </button>
+            </div>
           </div>
 
-          {/* STICKY SEARCH BAR - Moves slightly upward and stays fixed at top */}
-          <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md pt-2 pb-3 -mx-5 px-5 transition-all border-b border-purple-50/80 shadow-[0_4px_20px_rgba(85,60,251,0.03)]">
+          {/* STICKY SEARCH BAR - GPU Accelerated, Clean Solid Background (Zero Scroll Stutter) */}
+          <div className="sticky top-0 z-30 bg-white/98 transform-gpu pt-2 pb-3 -mx-5 px-5 border-b border-purple-50/80 shadow-[0_4px_16px_rgba(85,60,251,0.04)]">
             <div className="relative">
               <div className="flex items-center bg-[#f8f9fe] hover:bg-[#f2f4fd] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#553cfb]/25 focus-within:border-[#553cfb] border border-purple-100/90 rounded-full px-4 py-2.5 shadow-[0_2px_12px_rgba(85,60,251,0.05)] transition-all">
                 <Search className="text-[#553cfb] w-4 h-4 mr-2.5 flex-shrink-0" />
@@ -423,10 +450,10 @@ export default function Page() {
           {/* Hero Carousel */}
           {heroMovies.length > 0 && (
             <div className="mt-5 flex gap-3.5 overflow-x-auto hide-scrollbar -mx-5 px-5 snap-x snap-mandatory pb-2">
-              {heroMovies.map((movie) => (
+              {heroMovies.map((movie, idx) => (
                 <div 
                   key={movie.id} 
-                  className="relative h-[215px] w-[88%] rounded-[26px] overflow-hidden flex-shrink-0 snap-center cursor-pointer bg-placeholder shadow-[0_10px_28px_rgba(85,60,251,0.12)] border border-purple-100/50 group active:scale-[0.99] transition-all"
+                  className="relative h-[215px] w-[88%] rounded-[26px] overflow-hidden flex-shrink-0 snap-center cursor-pointer bg-placeholder shadow-[0_8px_24px_rgba(85,60,251,0.12)] border border-purple-100/50 group active:scale-[0.99] transition-transform"
                   onClick={() => setSelectedMovie(movie)}
                 >
                   {movie.image && (
@@ -434,11 +461,13 @@ export default function Page() {
                       src={movie.image} 
                       alt={movie.title} 
                       fill 
-                      className="object-cover group-hover:scale-105 transition-transform duration-700 ease-out" 
+                      sizes="(max-width: 640px) 90vw, 420px"
+                      priority={idx === 0}
+                      className="object-cover group-hover:scale-105 transition-transform duration-500 ease-out" 
                     />
                   )}
                   {/* Cinematic multi-stop gradient overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/45 to-black/10"></div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/45 to-black/10 pointer-events-none"></div>
                   
                   {/* Top Badges */}
                   <div className="absolute top-3.5 left-3.5 right-3.5 flex items-center justify-between">
@@ -446,7 +475,7 @@ export default function Page() {
                       {movie.quality || "Featured HD"}
                     </span>
                     {movie.rating && (
-                      <div className="bg-black/60 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-white/10">
+                      <div className="bg-black/80 text-white text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-white/15">
                         <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
                         <span>{movie.rating}</span>
                       </div>
@@ -460,7 +489,7 @@ export default function Page() {
                         {movie.title.replace(/\s\(\d{4}\).*$/, '')}
                       </h2>
                       <div className="flex items-center gap-2 text-xs font-medium text-purple-200">
-                        <span className="bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-md text-[11px] text-white font-semibold line-clamp-1">
+                        <span className="bg-white/25 px-2 py-0.5 rounded-md text-[11px] text-white font-semibold line-clamp-1">
                           {movie.genre || "Action"}
                         </span>
                         {movie.duration && (
@@ -501,23 +530,25 @@ export default function Page() {
                     className="w-[136px] flex-shrink-0 cursor-pointer group active:scale-[0.98] transition-transform" 
                     onClick={() => setSelectedMovie(movie)}
                   >
-                    <div className="relative h-[195px] rounded-[22px] overflow-hidden mb-2 bg-placeholder shadow-[0_4px_16px_rgba(0,0,0,0.06)] border border-purple-50/80 group-hover:shadow-[0_8px_24px_rgba(85,60,251,0.18)] transition-all">
+                    <div className="relative h-[195px] rounded-[22px] overflow-hidden mb-2 bg-placeholder shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
                       {movie.image && (
                         <Image 
                           src={movie.image} 
                           alt={movie.title} 
                           fill 
-                          className="object-cover group-hover:scale-105 transition-transform duration-500" 
+                          sizes="140px"
+                          loading="lazy"
+                          className="object-cover group-hover:scale-105 transition-transform duration-300" 
                         />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                       {movie.rating && (
-                        <div className="absolute top-2 right-2 bg-black/65 backdrop-blur-md text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/10">
+                        <div className="absolute top-2 right-2 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
                           <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
                         </div>
                       )}
                       {movie.quality && (
-                        <div className="absolute bottom-2 left-2 bg-[#553cfb]/90 backdrop-blur-sm text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md">
+                        <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
                           {movie.quality}
                         </div>
                       )}
@@ -558,23 +589,25 @@ export default function Page() {
                     className="w-[136px] flex-shrink-0 cursor-pointer group active:scale-[0.98] transition-transform" 
                     onClick={() => setSelectedMovie(movie)}
                   >
-                    <div className="relative h-[195px] rounded-[22px] overflow-hidden mb-2 bg-placeholder shadow-[0_4px_16px_rgba(0,0,0,0.06)] border border-purple-50/80 group-hover:shadow-[0_8px_24px_rgba(85,60,251,0.18)] transition-all">
+                    <div className="relative h-[195px] rounded-[22px] overflow-hidden mb-2 bg-placeholder shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
                       {movie.image && (
                         <Image 
                           src={movie.image} 
                           alt={movie.title} 
                           fill 
-                          className="object-cover group-hover:scale-105 transition-transform duration-500" 
+                          sizes="140px"
+                          loading="lazy"
+                          className="object-cover group-hover:scale-105 transition-transform duration-300" 
                         />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                       {movie.rating && (
-                        <div className="absolute top-2 right-2 bg-black/65 backdrop-blur-md text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/10">
+                        <div className="absolute top-2 right-2 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
                           <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
                         </div>
                       )}
                       {movie.quality && (
-                        <div className="absolute bottom-2 left-2 bg-[#553cfb]/90 backdrop-blur-sm text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md">
+                        <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
                           {movie.quality}
                         </div>
                       )}
@@ -589,7 +622,7 @@ export default function Page() {
             </div>
           )}
 
-          {/* All Movies Grid Section (Infinite Scroll) */}
+          {/* All Movies Grid Section (Infinite Scroll with IntersectionObserver) */}
           <div className="mt-8 pb-10">
             <div className="flex items-center justify-between mb-4 px-0.5">
               <div className="flex items-center gap-1.5">
@@ -610,23 +643,25 @@ export default function Page() {
                   className="cursor-pointer flex flex-col group active:scale-[0.98] transition-transform" 
                   onClick={() => setSelectedMovie(movie)}
                 >
-                  <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_4px_16px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_8px_24px_rgba(85,60,251,0.18)] transition-all">
+                  <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
                     {movie.image && (
                       <Image 
                         src={movie.image} 
                         alt={movie.title} 
                         fill 
-                        className="object-cover group-hover:scale-105 transition-transform duration-500" 
+                        sizes="(max-width: 640px) 45vw, 200px"
+                        loading="lazy"
+                        className="object-cover group-hover:scale-105 transition-transform duration-300" 
                       />
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                     {movie.rating && (
-                      <div className="absolute top-2.5 right-2.5 bg-black/65 backdrop-blur-md text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/10">
+                      <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
                         <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
                       </div>
                     )}
                     {movie.quality && (
-                      <div className="absolute bottom-2 left-2 bg-[#553cfb]/90 backdrop-blur-sm text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md">
+                      <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
                         {movie.quality}
                       </div>
                     )}
@@ -639,9 +674,12 @@ export default function Page() {
               ))}
             </div>
             
+            {/* Infinite Scroll Sentinel - Triggers loading asynchronously */}
+            <div ref={sentinelRef} className="h-6 w-full pointer-events-none" />
+
             {/* Loading spinner for infinite scroll */}
             {isLoadingMore && (
-              <div className="flex flex-col justify-center items-center py-8 mt-2">
+              <div className="flex flex-col justify-center items-center py-6 mt-2">
                 <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
                 <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more titles...</span>
               </div>
@@ -908,27 +946,26 @@ export default function Page() {
 
                 {/* 2. Scrollable Body: Total Downloaded Movies & List */}
                 <div className="flex-1 overflow-y-auto px-4 py-4 hide-scrollbar space-y-4">
-                  {/* Total Downloaded Movies Counter Card */}
+                  {/* My Downloads Summary Card */}
                   <div className="bg-gradient-to-br from-[#f8f9fe] via-white to-[#f3f1ff] border border-purple-100 rounded-[20px] p-4 shadow-[0_4px_16px_rgba(85,60,251,0.05)]">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
-                        My Downloads
-                      </span>
-                      <span className="w-7 h-7 rounded-full bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb]">
-                        <Download className="w-3.5 h-3.5" />
-                      </span>
-                    </div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-3xl font-black text-[#553cfb] tracking-tight">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="w-10 h-10 rounded-2xl bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb]">
+                          <Download className="w-5 h-5" />
+                        </span>
+                        <div>
+                          <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block">
+                            My Downloads
+                          </span>
+                          <span className="text-xs text-gray-400 font-medium">
+                            Saved locally on this device
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-3xl font-black text-gray-900 tracking-tight">
                         {downloadedList.length}
-                      </span>
-                      <span className="text-xs font-bold text-gray-600">
-                        {downloadedList.length === 1 ? "Movie Downloaded" : "Movies Downloaded"}
-                      </span>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-gray-400 mt-1 font-medium">
-                      Stored in browser & device storage
-                    </p>
                   </div>
 
                   {/* List of Downloaded Movies */}
