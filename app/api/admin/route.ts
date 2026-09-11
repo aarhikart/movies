@@ -35,25 +35,71 @@ export async function POST(request: Request) {
       
       $(el).find('.row').each((_, row) => {
         const label = $(row).find('.label').text().trim();
-        const val = $(row).find('.val-blue, .val-green, .val-orange').text().trim();
         
-        if (label.includes('Movie Name')) title = val;
-        if (label.includes('Starcast')) starcast = val;
-        if (label.includes('Genres')) genres = val;
-        if (label.includes('Quality')) quality = val;
-        if (label.includes('Length')) duration = val;
-        if (label.includes('Release Date')) releaseDate = val;
-        if (label.includes('Movie Story')) overview = val;
-        if (label.includes('Category')) category = val;
+        // Clone the row, strip the label, and retrieve the full text content
+        const rowClone = $(row).clone();
+        rowClone.find('.label').remove();
+        let val = rowClone.text().replace(/\s+/g, ' ').trim();
+
+        // Fallback to specific classes if empty
+        if (!val) {
+          val = $(row).find('.val-blue, .val-green, .val-orange, .artist, .green, font').text().replace(/\s+/g, ' ').trim();
+        }
+        
+        if (/Movie Name/i.test(label)) title = val;
+        else if (/Starcast/i.test(label)) starcast = val;
+        else if (/Genres?/i.test(label)) genres = val;
+        else if (/Quality/i.test(label)) quality = val;
+        else if (/Length|Duration/i.test(label)) duration = val;
+        else if (/Release Date/i.test(label)) releaseDate = val;
+        else if (/Movie Story|Story|Overview|Plot|Synopsis/i.test(label)) overview = val;
+        else if (/Category/i.test(label)) category = val;
       });
 
-      const downloadLinks: any[] = [];
-      $(el).find('.dl-list li a').each((_, a) => {
-        downloadLinks.push({
-          label: $(a).text().trim(),
-          url: $(a).attr('href')
+      // Fallback for overview (Movie Story) if outside standard .row structure
+      if (!overview) {
+        $(el).find('div, p, span').each((_, elem) => {
+          const t = $(elem).text();
+          if (/Movie Story\s*:|Story\s*:/i.test(t)) {
+            const parts = t.split(/Movie Story\s*:|Story\s*:/i);
+            if (parts[1] && parts[1].trim()) {
+              overview = parts[1].replace(/\s+/g, ' ').trim();
+            }
+          }
         });
+      }
+
+      // Extract download links (both inside .card and following sibling elements)
+      const downloadLinks: any[] = [];
+      $(el).find('.dl-list li a, a[href*="/server/"], a[href*="/dl/"]').each((_, a) => {
+        const href = $(a).attr('href');
+        const text = $(a).text().trim().replace(/^[»\s]+/, '');
+        if (href) {
+          downloadLinks.push({ label: text, url: href });
+        }
       });
+
+      // If links are placed outside .card as siblings before next .card
+      if (downloadLinks.length === 0) {
+        let nextEl = $(el).next();
+        while (nextEl.length && !nextEl.hasClass('card')) {
+          nextEl.find('.dl-list li a, a[href*="/server/"], a[href*="/dl/"]').each((_, a) => {
+            const href = $(a).attr('href');
+            const text = $(a).text().trim().replace(/^[»\s]+/, '');
+            if (href) {
+              downloadLinks.push({ label: text, url: href });
+            }
+          });
+          if (nextEl.is('a[href*="/server/"]') || nextEl.is('a[href*="/dl/"]')) {
+            const href = nextEl.attr('href');
+            const text = nextEl.text().trim().replace(/^[»\s]+/, '');
+            if (href) {
+              downloadLinks.push({ label: text, url: href });
+            }
+          }
+          nextEl = nextEl.next();
+        }
+      }
       
       if (!title || !title.trim()) {
         return; 
@@ -109,17 +155,17 @@ export async function POST(request: Request) {
       newMovies.push({
         id: movieId,
         title,
-        image: poster,
+        image: poster || existingMatch?.image || '',
         rating,
-        genre: genres,
-        duration: duration === 'N/A' ? '' : duration,
-        releaseDate,
-        starcast,
-        overview,
-        quality,
-        downloadLinks,
-        industry, 
-        category,
+        genre: genres || existingMatch?.genre || '',
+        duration: (duration === 'N/A' || !duration) ? (existingMatch?.duration || '') : duration,
+        releaseDate: releaseDate || existingMatch?.releaseDate || '',
+        starcast: starcast || existingMatch?.starcast || '',
+        overview: overview || existingMatch?.overview || '',
+        quality: quality || existingMatch?.quality || '',
+        downloadLinks: downloadLinks.length > 0 ? downloadLinks : (existingMatch?.downloadLinks || []),
+        industry: industry !== 'Unknown' ? industry : (existingMatch?.industry || 'Bollywood'), 
+        category: category || existingMatch?.category || '',
         type: movieType
       });
     });
