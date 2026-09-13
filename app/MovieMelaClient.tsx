@@ -17,7 +17,8 @@ import {
   Info,
   Trash2,
   Share2,
-  Check
+  Check,
+  Copy
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -47,6 +48,22 @@ type Movie = {
   downloadLinks: { label: string; url: string }[];
   type?: string;
 };
+
+function WhatsAppIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2m.01 1.67c2.2 0 4.26.86 5.82 2.42a8.23 8.23 0 012.41 5.82c0 4.54-3.7 8.24-8.24 8.24-1.41 0-2.79-.36-4.01-1.05l-.29-.16-3.12.82.83-3.04-.19-.3a8.21 8.21 0 01-1.26-4.47c0-4.54 3.7-8.24 8.24-8.24m4.52 11.66c-.25-.13-1.47-.72-1.7-.81-.23-.08-.39-.13-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.13-1.06-.39-2.02-1.25-.75-.67-1.26-1.5-1.4-1.75-.15-.25-.02-.39.11-.51.11-.11.25-.29.38-.44.12-.14.17-.25.25-.42.08-.17.04-.31-.02-.44-.06-.13-.56-1.35-.77-1.85-.2-.49-.41-.42-.56-.43h-.48c-.17 0-.44.06-.67.31-.23.25-.88.86-.88 2.1 0 1.23.9 2.43 1.03 2.6.12.17 1.77 2.7 4.29 3.78.6.26 1.07.41 1.43.53.6.19 1.15.16 1.58.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.15-1.18-.06-.12-.23-.19-.48-.31z"/>
+    </svg>
+  );
+}
+
+function InstagramIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+    </svg>
+  );
+}
 
 export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: string }) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -156,6 +173,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
   // Movie Share & Deep Link State
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [isSharing, setIsSharing] = useState(false);
+  const [showShareSheet, setShowShareSheet] = useState(false);
 
   // Auto-open movie details modal if initialMovieId or URL has ?movie=ID or /movie/ID
   useEffect(() => {
@@ -212,27 +230,98 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     }
   }, [selectedMovie]);
 
-  // Share Movie via native Web Share sheet (WhatsApp, Telegram, etc.) with OpenGraph preview card & direct movie link
-  const handleShareMovie = async (movie: Movie | null) => {
+  // WhatsApp Card Share
+  const handleShareWhatsApp = (movie: Movie | null) => {
+    if (!movie) return;
+    const currentOrigin = typeof window !== "undefined"
+      ? (process.env.NEXT_PUBLIC_SITE_URL || window.location.origin)
+      : "";
+    const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
+    const displayTitle = movie.title || "Movie";
+    const shareCaption = `🎬 *${displayTitle}*\n\nWatch this movie on MovieMela:\n${shareUrl}`;
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareCaption)}`;
+    window.open(whatsappUrl, "_blank");
+    setShowShareSheet(false);
+  };
+
+  // Instagram Story Share:
+  // Native & 100% free (no APIs/third-party platforms):
+  // 1. Copies direct movie URL to clipboard for the Instagram Link Sticker
+  // 2. Fetches high-res movie poster image via proxy
+  // 3. Invokes Web Share API with image file -> user picks "Instagram Stories"
+  // 4. On Desktop: downloads poster & copies movie link for manual upload
+  const handleShareInstagramStory = async (movie: Movie | null) => {
     if (!movie) return;
     setIsSharing(true);
 
     const currentOrigin = typeof window !== "undefined"
       ? (process.env.NEXT_PUBLIC_SITE_URL || window.location.origin)
       : "";
-    // Clean movie link for WhatsApp preview
     const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
-    const cleanMovieTitle = movie.title.replace(/\s\(\d{4}\).*$/, "").trim();
-    const displayTitle = movie.title || cleanMovieTitle;
-    
-    // Formatted text with:
-    // 1. Movie Name: 🎬 *Title*
-    // 2. Image of Movie: Generated as rich preview card by WhatsApp server scraper via OpenGraph
-    // 3. Message: Watch this movie on MovieMela:
-    // 4. Movie URL: Direct link that opens this movie popup
+
+    // 1. Copy URL to clipboard for the Instagram Link Sticker
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+      }
+    } catch (_) {}
+
+    try {
+      let proxyUrl = movie.image;
+      if (movie.image && (movie.image.startsWith("http://") || movie.image.startsWith("https://"))) {
+        proxyUrl = `/api/proxy-image?url=${encodeURIComponent(movie.image)}`;
+      }
+      const imgRes = await fetch(proxyUrl);
+      if (!imgRes.ok) throw new Error("Failed to load poster image");
+      const blob = await imgRes.blob();
+      const cleanName = (movie.title || "movie").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const posterFile = new File([blob], `${cleanName}_story.jpg`, { type: blob.type || "image/jpeg" });
+
+      if (typeof navigator !== "undefined" && typeof (navigator as any).canShare === "function") {
+        if ((navigator as any).canShare({ files: [posterFile] })) {
+          setShareToast("Movie link copied! Select 'Instagram Stories' to post.");
+          setTimeout(() => setShareToast(null), 4000);
+          await navigator.share({
+            files: [posterFile],
+            title: movie.title,
+          });
+          setIsSharing(false);
+          setShowShareSheet(false);
+          return;
+        }
+      }
+
+      // Desktop fallback: Download image file & notify user
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.href = URL.createObjectURL(blob);
+      downloadAnchor.download = `${cleanName}_story.jpg`;
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      document.body.removeChild(downloadAnchor);
+      setShareToast("Poster downloaded & movie link copied! Upload to your Instagram Story.");
+      setTimeout(() => setShareToast(null), 4500);
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        setShareToast("Movie link copied to clipboard!");
+        setTimeout(() => setShareToast(null), 3000);
+      }
+    } finally {
+      setIsSharing(false);
+      setShowShareSheet(false);
+    }
+  };
+
+  // Device Native Share (Telegram, SMS, Twitter, etc.)
+  const handleShareNative = async (movie: Movie | null) => {
+    if (!movie) return;
+    setIsSharing(true);
+    const currentOrigin = typeof window !== "undefined"
+      ? (process.env.NEXT_PUBLIC_SITE_URL || window.location.origin)
+      : "";
+    const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
+    const displayTitle = movie.title || "Movie";
     const shareCaption = `🎬 *${displayTitle}*\n\nWatch this movie on MovieMela:\n${shareUrl}`;
 
-    // 1. Try native Web Share API
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
@@ -240,31 +329,31 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
           text: `🎬 *${displayTitle}*\n\nWatch this movie on MovieMela:\n`,
           url: shareUrl,
         });
-        setIsSharing(false);
-        return;
-      } catch (err: any) {
-        if (err?.name === "AbortError") {
-          setIsSharing(false);
-          return;
-        }
-      }
-    }
-
-    // 2. Direct WhatsApp Web / App share fallback (or desktop)
-    try {
-      const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareCaption)}`;
-      window.open(whatsappUrl, "_blank");
-      setShareToast("Opening WhatsApp...");
-      setTimeout(() => setShareToast(null), 3000);
-    } catch (_) {
+      } catch (e) {}
+    } else {
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(shareCaption);
-        setShareToast("Movie link copied! Share it on WhatsApp or Telegram.");
+        setShareToast("Movie link copied to clipboard!");
         setTimeout(() => setShareToast(null), 3000);
       }
-    } finally {
-      setIsSharing(false);
     }
+    setIsSharing(false);
+    setShowShareSheet(false);
+  };
+
+  // Copy Direct Link
+  const handleCopyLink = async (movie: Movie | null) => {
+    if (!movie) return;
+    const currentOrigin = typeof window !== "undefined"
+      ? (process.env.NEXT_PUBLIC_SITE_URL || window.location.origin)
+      : "";
+    const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareToast("Movie link copied to clipboard!");
+      setTimeout(() => setShareToast(null), 3000);
+    }
+    setShowShareSheet(false);
   };
 
   // Fetch unique categories for the filter chips
@@ -851,8 +940,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
 
               <div className="absolute top-5 right-5 flex items-center gap-2 z-10">
                 <button
-                  onClick={() => handleShareMovie(selectedMovie)}
-                  disabled={isSharing}
+                  onClick={() => setShowShareSheet(true)}
                   className="w-8 h-8 bg-[#f5f6f8] hover:bg-purple-100/60 text-gray-600 hover:text-[#553cfb] rounded-full flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
                   aria-label="Share movie"
                   title="Share movie"
@@ -1004,23 +1092,135 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                       <Download className="w-4 h-4 text-[#553cfb]" /> Download HD
                     </button>
                     <button
-                      onClick={() => handleShareMovie(selectedMovie)}
-                      disabled={isSharing}
-                      className="w-[50px] h-[50px] rounded-[18px] bg-purple-50 hover:bg-purple-100/80 border border-purple-200/80 flex items-center justify-center text-[#553cfb] transition-all active:scale-95 cursor-pointer shadow-2xs flex-shrink-0 disabled:opacity-50"
+                      onClick={() => setShowShareSheet(true)}
+                      className="w-[50px] h-[50px] rounded-[18px] bg-purple-50 hover:bg-purple-100/80 border border-purple-200/80 flex items-center justify-center text-[#553cfb] transition-all active:scale-95 cursor-pointer shadow-2xs flex-shrink-0"
                       aria-label="Share movie"
                       title="Share movie with friends"
                     >
-                      {isSharing ? (
-                        <div className="w-4 h-4 rounded-full border-2 border-[#553cfb] border-t-transparent animate-spin" />
-                      ) : (
-                        <Share2 className="w-5 h-5" />
-                      )}
+                      <Share2 className="w-5 h-5" />
                     </button>
                   </div>
                 </div>
               )}
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Modern Share Sheet Modal (WhatsApp, Instagram Story, Copy Link, More Apps) */}
+      <AnimatePresence>
+        {showShareSheet && selectedMovie && (
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowShareSheet(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-xs"
+            />
+
+            {/* Sheet Content */}
+            <motion.div
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 26, stiffness: 260 }}
+              className="relative w-full max-w-md bg-white rounded-t-[32px] sm:rounded-[28px] p-6 pb-8 z-10 shadow-2xl border-t sm:border border-purple-100"
+            >
+              {/* Grab handle for mobile */}
+              <div className="w-10 h-1.5 bg-gray-200 rounded-full mx-auto mb-4 sm:hidden" />
+
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center text-[#553cfb]">
+                    <Share2 className="w-4.5 h-4.5" />
+                  </div>
+                  <div>
+                    <h3 className="text-[15px] font-bold text-gray-900 leading-tight">Share Movie</h3>
+                    <p className="text-[11.5px] text-gray-500 font-medium truncate max-w-[230px]">
+                      {selectedMovie.title}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowShareSheet(false)}
+                  className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Share Options Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* 1. WhatsApp Card Share */}
+                <button
+                  onClick={() => handleShareWhatsApp(selectedMovie)}
+                  className="flex items-center gap-3 p-3.5 rounded-[20px] bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/80 text-left transition-all active:scale-[0.98] cursor-pointer group shadow-2xs"
+                >
+                  <div className="w-11 h-11 rounded-[16px] bg-[#25D366] text-white flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    <WhatsAppIcon className="w-6 h-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-[13px] font-bold text-gray-900 group-hover:text-emerald-900">WhatsApp</span>
+                    <span className="block text-[10.5px] text-gray-500 truncate">Card preview</span>
+                  </div>
+                </button>
+
+                {/* 2. Instagram Story Share (Poster + Link) */}
+                <button
+                  onClick={() => handleShareInstagramStory(selectedMovie)}
+                  disabled={isSharing}
+                  className="flex items-center gap-3 p-3.5 rounded-[20px] bg-pink-50/80 hover:bg-pink-100 border border-pink-200/80 text-left transition-all active:scale-[0.98] cursor-pointer group shadow-2xs disabled:opacity-50"
+                >
+                  <div className="w-11 h-11 rounded-[16px] bg-gradient-to-tr from-[#f09433] via-[#dc2743] to-[#bc1888] text-white flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    {isSharing ? (
+                      <div className="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    ) : (
+                      <InstagramIcon className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-[13px] font-bold text-gray-900 group-hover:text-pink-900">Insta Story</span>
+                    <span className="block text-[10.5px] text-gray-500 truncate">Poster + Link</span>
+                  </div>
+                </button>
+
+                {/* 3. Copy Direct Link */}
+                <button
+                  onClick={() => handleCopyLink(selectedMovie)}
+                  className="flex items-center gap-3 p-3.5 rounded-[20px] bg-[#f8f9fe] hover:bg-purple-100/60 border border-purple-100 text-left transition-all active:scale-[0.98] cursor-pointer group shadow-2xs"
+                >
+                  <div className="w-11 h-11 rounded-[16px] bg-gray-800 text-white flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    <Copy className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-[13px] font-bold text-gray-900">Copy Link</span>
+                    <span className="block text-[10.5px] text-gray-500 truncate">Direct movie URL</span>
+                  </div>
+                </button>
+
+                {/* 4. More Apps (Device Native Share) */}
+                <button
+                  onClick={() => handleShareNative(selectedMovie)}
+                  className="flex items-center gap-3 p-3.5 rounded-[20px] bg-purple-50/80 hover:bg-purple-100 border border-purple-200/80 text-left transition-all active:scale-[0.98] cursor-pointer group shadow-2xs"
+                >
+                  <div className="w-11 h-11 rounded-[16px] bg-[#553cfb] text-white flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    <Share2 className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-[13px] font-bold text-gray-900 group-hover:text-[#553cfb]">More Apps</span>
+                    <span className="block text-[10.5px] text-gray-500 truncate">Telegram, SMS, etc.</span>
+                  </div>
+                </button>
+              </div>
+
+              {/* Helpful hint */}
+              <p className="text-[11px] text-gray-400 text-center mt-4">
+                Tip: For Instagram Story, the movie link is copied so you can paste it in the Link sticker!
+              </p>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
