@@ -2,8 +2,20 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getFilterForCategory } from '../../categoryHelper';
+import { getMovieById } from '@/lib/movieHelper';
 
 export async function GET(request: Request) {
+  // Create a new URL object to get params
+  const url = new URL(request.url);
+  const id = url.searchParams.get('id');
+  if (id) {
+    const found = getMovieById(id);
+    if (found) {
+      return NextResponse.json({ success: true, movie: found, data: [found], total: 1 });
+    }
+    return NextResponse.json({ success: false, error: 'Movie not found', data: [] }, { status: 404 });
+  }
+
   let movies = [];
   try {
     const filePath = path.join(process.cwd(), 'app', 'movies.json');
@@ -12,9 +24,7 @@ export async function GET(request: Request) {
   } catch (e) {
     console.error("Failed to load movies.json", e);
   }
-  
-  // Create a new URL object to get params
-  const url = new URL(request.url);
+
   const q = url.searchParams.get('q');
   const page = parseInt(url.searchParams.get('page') || '1');
   const limit = parseInt(url.searchParams.get('limit') || '20');
