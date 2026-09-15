@@ -14,7 +14,8 @@ import {
   Database,
   Activity,
   Sparkles,
-  Layers
+  Layers,
+  Tv
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -24,6 +25,9 @@ interface AdminStats {
   totalDownloads: number;
   activeSessions: number;
   totalMoviesInCatalog: number;
+  totalOriginalMoviesInCatalog?: number;
+  totalWebSeriesInCatalog?: number;
+  totalWebSeriesEpisodes?: number;
   recentDownloads: Array<{
     id: string;
     title: string;
@@ -39,7 +43,7 @@ export default function AdminPage() {
   const [isStatsLoading, setIsStatsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // HTML Importer state (original functionality)
+  // Dubbed Movie HTML Importer state
   const [htmlInput, setHtmlInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<{
@@ -49,8 +53,29 @@ export default function AdminPage() {
     updatedCount?: number;
   } | null>(null);
 
-  // Active tab: "overview" | "importer"
-  const [activeTab, setActiveTab] = useState<"overview" | "importer">("overview");
+  // Original Movies HTML Importer state
+  const [originalHtmlInput, setOriginalHtmlInput] = useState("");
+  const [isOriginalLoading, setIsOriginalLoading] = useState(false);
+  const [originalResult, setOriginalResult] = useState<{
+    success: boolean;
+    message: string;
+    addedCount?: number;
+    updatedCount?: number;
+  } | null>(null);
+
+  // Web Series HTML Importer state
+  const [webSeriesHtmlInput, setWebSeriesHtmlInput] = useState("");
+  const [isWebSeriesLoading, setIsWebSeriesLoading] = useState(false);
+  const [webSeriesResult, setWebSeriesResult] = useState<{
+    success: boolean;
+    message: string;
+    addedCount?: number;
+    updatedCount?: number;
+    totalEpisodesProcessed?: number;
+  } | null>(null);
+
+  // Active tab: "overview" | "importer" | "original-importer" | "webseries-importer"
+  const [activeTab, setActiveTab] = useState<"overview" | "importer" | "original-importer" | "webseries-importer">("overview");
 
   const fetchStats = useCallback(async (showRefreshingSpinner = false) => {
     if (showRefreshingSpinner) setIsRefreshing(true);
@@ -63,6 +88,9 @@ export default function AdminPage() {
           totalDownloads: data.totalDownloads || 0,
           activeSessions: data.activeSessions || 0,
           totalMoviesInCatalog: data.totalMoviesInCatalog || 0,
+          totalOriginalMoviesInCatalog: data.totalOriginalMoviesInCatalog || 0,
+          totalWebSeriesInCatalog: data.totalWebSeriesInCatalog || 0,
+          totalWebSeriesEpisodes: data.totalWebSeriesEpisodes || 0,
           recentDownloads: Array.isArray(data.recentDownloads) ? data.recentDownloads : [],
         });
       }
@@ -93,7 +121,7 @@ export default function AdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ html: htmlInput }),
+        body: JSON.stringify({ html: htmlInput, catalog: "dubbed" }),
       });
 
       const data = await res.json();
@@ -117,6 +145,91 @@ export default function AdminPage() {
       setResult({ success: false, message: "Network error occurred" });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGenerateOriginal = async () => {
+    if (!originalHtmlInput.trim()) {
+      setOriginalResult({ success: false, message: "Please paste some HTML table rows first." });
+      return;
+    }
+
+    setIsOriginalLoading(true);
+    setOriginalResult(null);
+
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ html: originalHtmlInput, catalog: "original" }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setOriginalResult({
+          success: true,
+          message: `Successfully processed!`,
+          addedCount: data.addedCount,
+          updatedCount: data.updatedCount,
+        });
+        if ((data.addedCount ?? 0) > 0 || (data.updatedCount ?? 0) > 0) {
+          setOriginalHtmlInput(""); // Clear input on success
+        }
+        // Refresh catalog count
+        fetchStats();
+      } else {
+        setOriginalResult({ success: false, message: data.error || "Failed to parse HTML" });
+      }
+    } catch (error) {
+      setOriginalResult({ success: false, message: "Network error occurred" });
+    } finally {
+      setIsOriginalLoading(false);
+    }
+  };
+
+  const handleGenerateWebSeries = async () => {
+    if (!webSeriesHtmlInput.trim()) {
+      setWebSeriesResult({ success: false, message: "Please paste some HTML table rows first." });
+      return;
+    }
+
+    setIsWebSeriesLoading(true);
+    setWebSeriesResult(null);
+
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ html: webSeriesHtmlInput, catalog: "web_series" }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setWebSeriesResult({
+          success: true,
+          message: `Successfully processed web series!`,
+          addedCount: data.addedCount,
+          updatedCount: data.updatedCount,
+          totalEpisodesProcessed: data.totalEpisodesProcessed,
+        });
+        if ((data.addedCount ?? 0) > 0 || (data.updatedCount ?? 0) > 0 || (data.totalEpisodesProcessed ?? 0) > 0) {
+          setWebSeriesHtmlInput(""); // Clear input on success
+        }
+        // Refresh catalog count
+        fetchStats();
+      } else {
+        setWebSeriesResult({ success: false, message: data.error || "Failed to parse HTML" });
+      }
+    } catch (error) {
+      setWebSeriesResult({ success: false, message: "Network error occurred" });
+    } finally {
+      setIsWebSeriesLoading(false);
     }
   };
 
@@ -212,7 +325,31 @@ export default function AdminPage() {
             }`}
           >
             <Layers className="w-4 h-4" />
-            Movie Catalog Importer
+            Dubbed Movies Importer
+          </button>
+
+          <button
+            onClick={() => setActiveTab("original-importer")}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === "original-importer"
+                ? "bg-[#553cfb] text-white shadow-md shadow-[#553cfb]/25"
+                : "bg-white text-gray-600 hover:bg-purple-50 hover:text-[#553cfb] border border-purple-100"
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            Original Movies Importer
+          </button>
+
+          <button
+            onClick={() => setActiveTab("webseries-importer")}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === "webseries-importer"
+                ? "bg-[#553cfb] text-white shadow-md shadow-[#553cfb]/25"
+                : "bg-white text-gray-600 hover:bg-purple-50 hover:text-[#553cfb] border border-purple-100"
+            }`}
+          >
+            <Tv className="w-4 h-4" />
+            Web Series Importer
           </button>
         </div>
 
@@ -270,22 +407,43 @@ export default function AdminPage() {
               <div className="bg-white rounded-2xl border border-purple-100 p-5 shadow-[0_4px_20px_rgba(85,60,251,0.05)] hover:shadow-[0_6px_24px_rgba(85,60,251,0.10)] transition-all">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-extrabold uppercase tracking-wider text-gray-500">
-                    Movies Catalog
+                    Live Catalogs
                   </span>
                   <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
                     <Film className="w-5 h-5" />
                   </div>
                 </div>
-                <div className="text-3xl font-black text-gray-900 tracking-tight">
-                  {isStatsLoading ? (
-                    <div className="h-9 w-24 bg-gray-100 animate-pulse rounded-lg"></div>
-                  ) : (
-                    stats?.totalMoviesInCatalog.toLocaleString() ?? "0"
-                  )}
+                <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2">
+                  <div className="text-xl font-black text-gray-900 tracking-tight">
+                    {isStatsLoading ? (
+                      <div className="h-7 w-10 bg-gray-100 animate-pulse rounded-lg"></div>
+                    ) : (
+                      stats?.totalMoviesInCatalog.toLocaleString() ?? "0"
+                    )}
+                  </div>
+                  <span className="text-[10px] font-bold text-gray-400">Dubbed</span>
+                  <span className="text-gray-300">•</span>
+                  <div className="text-xl font-black text-[#553cfb] tracking-tight">
+                    {isStatsLoading ? (
+                      <div className="h-7 w-10 bg-gray-100 animate-pulse rounded-lg"></div>
+                    ) : (
+                      (stats?.totalOriginalMoviesInCatalog ?? 0).toLocaleString()
+                    )}
+                  </div>
+                  <span className="text-[10px] font-bold text-[#553cfb]">Original</span>
+                  <span className="text-gray-300">•</span>
+                  <div className="text-xl font-black text-indigo-600 tracking-tight">
+                    {isStatsLoading ? (
+                      <div className="h-7 w-10 bg-gray-100 animate-pulse rounded-lg"></div>
+                    ) : (
+                      (stats?.totalWebSeriesInCatalog ?? 0).toLocaleString()
+                    )}
+                  </div>
+                  <span className="text-[10px] font-bold text-indigo-600">Series ({stats?.totalWebSeriesEpisodes ?? 0} eps)</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2 text-[11px] text-gray-400 font-medium">
                   <Sparkles className="w-3 h-3 text-purple-600" />
-                  <span>Available on MovieMela</span>
+                  <span>3 catalogs live on MovieMela</span>
                 </div>
               </div>
 
@@ -442,6 +600,137 @@ export default function AdminPage() {
                 }`}
               >
                 {isLoading ? "Processing Data..." : "Generate & Save to Database"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "original-importer" && (
+          <div className="bg-white rounded-2xl border border-purple-100 p-6 shadow-[0_4px_20px_rgba(85,60,251,0.05)] space-y-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-purple-50 text-[#553cfb] border border-purple-200">
+                  Original Movies
+                </span>
+                <h2 className="text-lg font-black text-gray-900">Add & Update Original Movies Catalog</h2>
+              </div>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                Paste HTML table rows (containing <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;tr&gt;...&lt;td&gt;...&lt;/td&gt;&lt;/tr&gt;</code>) into the box below.
+                Movies are parsed with high-res TMDB posters, language categories, and multi-server streaming links (Vidcore, Vidsu, Vidme, Vidru, Nightflix) saved to <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">original_movies.json</code>.
+              </p>
+            </div>
+
+            {originalResult && (
+              <div
+                className={`p-4 rounded-xl border flex items-start gap-3 ${
+                  originalResult.success
+                    ? "bg-green-50 border-green-200 text-green-800"
+                    : "bg-red-50 border-red-200 text-red-800"
+                }`}
+              >
+                {originalResult.success ? (
+                  <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-green-600" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-red-600" />
+                )}
+                <div>
+                  <p className="font-bold text-sm">{originalResult.message}</p>
+                  {originalResult.addedCount !== undefined && (
+                    <p className="text-xs mt-1">
+                      {(originalResult.addedCount ?? 0) > 0 || (originalResult.updatedCount ?? 0) > 0
+                        ? `Processed ${(originalResult.addedCount ?? 0) + (originalResult.updatedCount ?? 0)} original movies (${originalResult.addedCount ?? 0} new added, ${originalResult.updatedCount ?? 0} replaced/updated). They are now live on your Original Movies tab!`
+                        : "No original movies were processed."}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <textarea
+              className="w-full h-72 bg-[#f8f9fe] border border-gray-200 rounded-xl p-4 font-mono text-xs sm:text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-[#553cfb]/25 focus:border-[#553cfb] resize-none"
+              placeholder='Paste your table rows (&lt;tr&gt;...&lt;/tr&gt;) HTML here...&#10;&#10;e.g.,&#10;&lt;tr&gt;&#10;  &lt;td&gt;1&lt;/td&gt;&#10;  &lt;td&gt;&lt;img src="https://image.tmdb.org/t/p/w500/..." ...&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;strong&gt;Movie Title&lt;/strong&gt;&lt;/td&gt;&#10;  &lt;td&gt;Movie story overview...&lt;/td&gt;&#10;  &lt;td&gt;2024-09-21&lt;/td&gt;&#10;  &lt;td&gt;&lt;span class="badge-tag"&gt;ML&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;span class="badge-country"&gt;IN&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;118 min&lt;/td&gt;&#10;  &lt;td&gt;⭐ 6.8&lt;/td&gt;&#10;  &lt;td&gt;&lt;a href="https://nightflix.vg/movie/927547"&gt;Play Movie&lt;/a&gt;&lt;/td&gt;&#10;&lt;/tr&gt;'
+              value={originalHtmlInput}
+              onChange={(e) => setOriginalHtmlInput(e.target.value)}
+            ></textarea>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400 font-medium">
+                Duplicates with matching TMDB IDs or titles are refreshed and moved to the top.
+              </span>
+              <button
+                onClick={handleGenerateOriginal}
+                disabled={isOriginalLoading}
+                className={`px-6 py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all cursor-pointer ${
+                  isOriginalLoading
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-110 shadow-[#553cfb]/25 active:scale-95"
+                }`}
+              >
+                {isOriginalLoading ? "Processing Original Data..." : "Generate & Save to Original Catalog"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "webseries-importer" && (
+          <div className="bg-white rounded-2xl border border-purple-100 p-6 shadow-[0_4px_20px_rgba(85,60,251,0.05)] space-y-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-purple-50 text-[#553cfb] border border-purple-200">
+                  Hindi Web Series
+                </span>
+                <h2 className="text-lg font-black text-gray-900">Add & Update Web Series Catalog</h2>
+              </div>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                Paste HTML table rows containing episodic TV data (with <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;tr&gt;...&lt;td&gt;...&lt;/td&gt;&lt;/tr&gt;</code>). Episodes are grouped automatically by show, season, and episode number into <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">web_series.json</code>.
+              </p>
+            </div>
+
+            {webSeriesResult && (
+              <div
+                className={`p-4 rounded-xl border flex items-start gap-3 ${
+                  webSeriesResult.success
+                    ? "bg-green-50 border-green-200 text-green-800"
+                    : "bg-red-50 border-red-200 text-red-800"
+                }`}
+              >
+                {webSeriesResult.success ? (
+                  <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-green-600" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-red-600" />
+                )}
+                <div>
+                  <p className="font-bold text-sm">{webSeriesResult.message}</p>
+                  {webSeriesResult.totalEpisodesProcessed !== undefined && (
+                    <p className="text-xs mt-1">
+                      Processed {webSeriesResult.totalEpisodesProcessed} episodes across {(webSeriesResult.addedCount ?? 0) + (webSeriesResult.updatedCount ?? 0)} shows ({webSeriesResult.addedCount ?? 0} new shows added, {webSeriesResult.updatedCount ?? 0} shows updated). They are now live on your Web Series tab!
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <textarea
+              className="w-full h-72 bg-[#f8f9fe] border border-gray-200 rounded-xl p-4 font-mono text-xs sm:text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-[#553cfb]/25 focus:border-[#553cfb] resize-none"
+              placeholder='Paste your table rows (&lt;tr&gt;...&lt;/tr&gt;) HTML here...&#10;&#10;e.g.,&#10;&lt;tr&gt;&#10;  &lt;td&gt;1&lt;/td&gt;&#10;  &lt;td&gt;&lt;img src="https://image.tmdb.org/t/p/w500/..." ...&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;strong&gt;India&apos;s Got Latent&lt;/strong&gt;&lt;br&gt;&lt;span&gt;ID: 262838&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;span class="badge-season"&gt;S01&lt;/span&gt; &lt;span class="badge-ep"&gt;E01&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;strong&gt;Episode 1&lt;/strong&gt;&lt;/td&gt;&#10;  &lt;td&gt;Episode description...&lt;/td&gt;&#10;  &lt;td&gt;2024-06-14&lt;/td&gt;&#10;  &lt;td&gt;44 min&lt;/td&gt;&#10;  &lt;td&gt;⭐ 9.0&lt;/td&gt;&#10;  &lt;td&gt;&lt;a href="https://vidcore.net/tv/262838/1/1"&gt;Vidcore&lt;/a&gt;&lt;/td&gt;&#10;&lt;/tr&gt;'
+              value={webSeriesHtmlInput}
+              onChange={(e) => setWebSeriesHtmlInput(e.target.value)}
+            ></textarea>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400 font-medium">
+                Shows with matching TMDB IDs or titles are refreshed and moved to the top of the catalog.
+              </span>
+              <button
+                onClick={handleGenerateWebSeries}
+                disabled={isWebSeriesLoading}
+                className={`px-6 py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all cursor-pointer ${
+                  isWebSeriesLoading
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-110 shadow-[#553cfb]/25 active:scale-95"
+                }`}
+              >
+                {isWebSeriesLoading ? "Processing Web Series..." : "Generate & Save to Web Series Catalog"}
               </button>
             </div>
           </div>

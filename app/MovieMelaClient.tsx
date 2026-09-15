@@ -18,7 +18,14 @@ import {
   Trash2,
   Share2,
   Check,
-  Copy
+  Copy,
+  SlidersHorizontal,
+  ShieldCheck,
+  Maximize2,
+  Minimize2,
+  RotateCcw,
+  Clock,
+  Tv
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -31,9 +38,19 @@ import {
   DOWNLOADS_EVENT, 
   DownloadedMovie 
 } from "@/lib/downloads";
+import {
+  getWatchHistory,
+  saveWatchProgress,
+  removeWatchHistoryItem,
+  clearWatchHistory,
+  WATCH_HISTORY_EVENT,
+  WatchedMovie
+} from "@/lib/watchHistory";
+import { WebSeriesShow, TvSeason, TvEpisode } from "@/lib/movieHelper";
 
 type Movie = {
   id: string;
+  tmdbId?: string;
   title: string;
   image: string;
   rating: string;
@@ -45,8 +62,14 @@ type Movie = {
   quality?: string;
   category?: string;
   industry?: string;
-  downloadLinks: { label: string; url: string }[];
+  downloadLinks?: { label: string; url: string }[];
   type?: string;
+  isOriginal?: boolean;
+  languageCode?: string;
+  country?: string;
+  playUrl?: string;
+  watchUrl?: string;
+  streamServers?: { name: string; url: string }[];
 };
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -65,21 +88,67 @@ function InstagramIcon({ className }: { className?: string }) {
   );
 }
 
+function getServersForMovie(movie: Movie) {
+  if (movie.streamServers && movie.streamServers.length > 0) {
+    return movie.streamServers;
+  }
+  const tmdbId = movie.tmdbId || (movie.id ? movie.id.replace(/^orig_/, '') : '');
+  if (tmdbId) {
+    return [
+      { name: "Vidme Fast (Ad-Free)", url: `https://vidzen.fun/movie/${tmdbId}?autoPlay=true` },
+      { name: "Vidsu (Clean HD)", url: `https://player-4aq.pages.dev/embed/movie/${tmdbId}?autoPlay=true` },
+      { name: "Vidcore HD", url: `https://vidcore.net/movie/${tmdbId}?autoPlay=true` },
+      { name: "VidLink HD", url: `https://vidlink.pro/movie/${tmdbId}?autoplay=true` },
+      { name: "AutoEmbed CC", url: `https://player.autoembed.cc/embed/movie/${tmdbId}` },
+    ];
+  }
+  return movie.watchUrl ? [{ name: "Stream Server", url: movie.watchUrl }] : [];
+}
+
 export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: string }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeChip, setActiveChip] = useState("All");
+  const [mainTab, setMainTab] = useState<"dubbed" | "original" | "webseries">("dubbed");
+  const [showCategorySheet, setShowCategorySheet] = useState(false);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [showPremiumPopup, setShowPremiumPopup] = useState(false);
   const [selectedAction, setSelectedAction] = useState<"watch" | "download">("download");
   const [showSplash, setShowSplash] = useState(true);
   
-  // Data states
-  const [heroMovies, setHeroMovies] = useState<Movie[]>([]);
-  const [popularMovies, setPopularMovies] = useState<Movie[]>([]);
-  const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
+  // Dubbed Data states
   const [allMovies, setAllMovies] = useState<Movie[]>([]);
   const [totalMovies, setTotalMovies] = useState(0);
+  
+  // Original Movies Data states
+  const [originalMovies, setOriginalMovies] = useState<Movie[]>([]);
+  const [totalOriginalMovies, setTotalOriginalMovies] = useState(0);
+  const [originalPage, setOriginalPage] = useState(1);
+  const [isLoadingMoreOriginal, setIsLoadingMoreOriginal] = useState(false);
+  const [originalChips, setOriginalChips] = useState<string[]>(["All"]);
+  const [activeOriginalChip, setActiveOriginalChip] = useState("All");
+
+  // Web Series Data states
+  const [webSeriesList, setWebSeriesList] = useState<WebSeriesShow[]>([]);
+  const [totalWebSeries, setTotalWebSeries] = useState(0);
+  const [webSeriesPage, setWebSeriesPage] = useState(1);
+  const [isLoadingMoreWebSeries, setIsLoadingMoreWebSeries] = useState(false);
+  const [webSeriesChips, setWebSeriesChips] = useState<string[]>(["All"]);
+  const [activeWebSeriesChip, setActiveWebSeriesChip] = useState("All");
+
+  // Selected Series for Episode Modal
+  const [selectedSeriesForEpisodes, setSelectedSeriesForEpisodes] = useState<WebSeriesShow | null>(null);
+  const [activeSeasonNumber, setActiveSeasonNumber] = useState<number>(1);
+
+  // In-App Cinema Streaming Player State (Zero Redirects)
+  const [streamingMovie, setStreamingMovie] = useState<Movie | null>(null);
+  const [activeServerIndex, setActiveServerIndex] = useState(0);
+  const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
+  const [isPlayerLoading, setIsPlayerLoading] = useState(true);
+
+  // Watch History & Continue Watching states
+  const [watchHistoryList, setWatchHistoryList] = useState<WatchedMovie[]>([]);
+  const [drawerTab, setDrawerTab] = useState<"history" | "downloads">("history");
   
   const [searchSuggestions, setSearchSuggestions] = useState<Movie[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -103,19 +172,136 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
   useEffect(() => {
     // Initial fetch from localStorage
     setDownloadedList(getDownloadedMovies());
+    setWatchHistoryList(getWatchHistory());
 
-    // Reactive sync when download completes or changes in any tab
+    // Reactive sync when downloads or watch history change
     const handleSync = () => {
       setDownloadedList(getDownloadedMovies());
+      setWatchHistoryList(getWatchHistory());
     };
 
     window.addEventListener(DOWNLOADS_EVENT, handleSync);
+    window.addEventListener(WATCH_HISTORY_EVENT, handleSync);
     window.addEventListener("storage", handleSync);
     return () => {
       window.removeEventListener(DOWNLOADS_EVENT, handleSync);
+      window.removeEventListener(WATCH_HISTORY_EVENT, handleSync);
       window.removeEventListener("storage", handleSync);
     };
   }, []);
+
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      playerContainerRef.current?.requestFullscreen?.().catch(() => {});
+      setIsPlayerFullscreen(true);
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+      setIsPlayerFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsPlayerFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  // Block any popup ads/tabs from opening or redirecting while video is playing
+  useEffect(() => {
+    if (!streamingMovie) return;
+    const originalOpen = window.open;
+    window.open = () => null;
+
+    // Prevent iframe ad scripts from hijacking/redirecting the main browser tab
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+      return "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.open = originalOpen;
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [streamingMovie]);
+
+  // Auto-advance watch history progress while player is actively open (every 30s +1%)
+  useEffect(() => {
+    if (!streamingMovie) return;
+
+    const interval = setInterval(() => {
+      setWatchHistoryList((prev) => {
+        const cur = prev.find(w => w.id === streamingMovie.id || (streamingMovie.tmdbId && w.tmdbId === streamingMovie.tmdbId));
+        const currentPct = cur ? cur.progressPercent : 15;
+        if (currentPct >= 95) return prev;
+        const updated = saveWatchProgress({
+          ...streamingMovie,
+          progressPercent: currentPct + 1
+        });
+        return updated;
+      });
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [streamingMovie]);
+
+  // Handler to initiate streaming and update watch history
+  const handleStartStreaming = (movie: Movie | WatchedMovie, serverIdx = 0, customProgress?: number) => {
+    const asMovie: Movie = {
+      id: movie.id,
+      tmdbId: movie.tmdbId,
+      title: movie.title,
+      image: movie.image || "",
+      rating: movie.rating || "8.5",
+      genre: movie.genre || "Original Cinema",
+      duration: movie.duration,
+      category: movie.category,
+      country: movie.country,
+      overview: movie.overview,
+      releaseDate: movie.releaseDate,
+      watchUrl: movie.watchUrl,
+      playUrl: movie.playUrl,
+      streamServers: movie.streamServers,
+      isOriginal: true,
+    };
+    setStreamingMovie(asMovie);
+    setActiveServerIndex(serverIdx);
+    setIsPlayerLoading(true);
+    setIsDrawerOpen(false);
+
+    const existingItem = watchHistoryList.find(w => w.id === movie.id || (movie.tmdbId && w.tmdbId === movie.tmdbId));
+    const progress = customProgress !== undefined 
+      ? customProgress 
+      : ('progressPercent' in movie && typeof movie.progressPercent === 'number' 
+          ? movie.progressPercent 
+          : (existingItem ? existingItem.progressPercent : 15));
+
+    const updated = saveWatchProgress({
+      id: movie.id,
+      tmdbId: movie.tmdbId,
+      title: movie.title,
+      image: movie.image,
+      category: movie.category,
+      genre: movie.genre,
+      duration: movie.duration,
+      rating: movie.rating,
+      progressPercent: progress,
+      lastServerName: movie.streamServers?.[serverIdx]?.name || "Vidcore HD",
+      lastServerUrl: movie.streamServers?.[serverIdx]?.url || "",
+      watchUrl: movie.watchUrl,
+      playUrl: movie.playUrl,
+      streamServers: movie.streamServers,
+      overview: movie.overview,
+      releaseDate: movie.releaseDate,
+      country: movie.country
+    });
+    setWatchHistoryList(updated);
+  };
 
   // PWA Phone Install Prompt State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -191,24 +377,32 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     // Immediately bypass splash screen when coming from a shared link
     setShowSplash(false);
 
-    const found = 
-      allMovies.find((m) => String(m.id) === String(targetMovieId)) ||
-      heroMovies.find((m) => String(m.id) === String(targetMovieId)) ||
-      trendingMovies.find((m) => String(m.id) === String(targetMovieId));
+    const found = allMovies.find((m) => String(m.id) === String(targetMovieId)) ||
+      originalMovies.find((m) => String(m.id) === String(targetMovieId) || String(m.tmdbId) === String(targetMovieId));
 
     if (found) {
       setSelectedMovie(found);
+      if (found.isOriginal) setMainTab("original");
     } else {
       fetch(`/api/movies?id=${encodeURIComponent(targetMovieId)}`)
         .then((res) => res.json())
         .then((data) => {
           if (data.success && data.movie) {
             setSelectedMovie(data.movie);
+          } else {
+            return fetch(`/api/original-movies?id=${encodeURIComponent(targetMovieId!)}`)
+              .then(r => r.json())
+              .then(orig => {
+                if (orig.success && orig.movie) {
+                  setSelectedMovie(orig.movie);
+                  setMainTab("original");
+                }
+              });
           }
         })
         .catch(() => {});
     }
-  }, [allMovies, heroMovies, trendingMovies, initialMovieId]);
+  }, [allMovies, originalMovies, initialMovieId]);
 
   // Synchronize browser URL query with currently open movie modal
   useEffect(() => {
@@ -368,15 +562,11 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       .catch(console.error);
   }, []);
 
-  // Fetch filtered "All Movies" and categories when activeChip changes
+  // Fetch filtered "All Movies" when activeChip changes
   useEffect(() => {
     const filterParam = activeChip === 'All' ? '' : `&filter=${encodeURIComponent(activeChip)}`;
     
-    fetch(`/api/movies?type=hero&limit=5${filterParam}`).then(res => res.json()).then(res => setHeroMovies(res.data));
-    fetch(`/api/movies?type=popular&limit=15${filterParam}`).then(res => res.json()).then(res => setPopularMovies(res.data));
-    fetch(`/api/movies?type=trending&limit=15${filterParam}`).then(res => res.json()).then(res => setTrendingMovies(res.data));
-
-    // Fetch All Movies grid
+    // Fetch Movies grid
     setPage(1);
     setIsLoadingMore(true);
     fetch(`/api/movies?page=1&limit=20${filterParam}`)
@@ -436,7 +626,167 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     return () => observer.disconnect();
   }, [loadMoreMovies, isLoadingMore, allMovies.length, totalMovies]);
 
-  // Debounced Search logic
+  // Fetch unique categories for Original Movies
+  useEffect(() => {
+    fetch('/api/original-movies?limit=1')
+      .then(res => res.json())
+      .then(data => {
+        if (data.categories && data.categories.length > 0) {
+          setOriginalChips(["All", ...data.categories]);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Fetch filtered "Original Movies" when activeOriginalChip changes or when mainTab switches to "original"
+  useEffect(() => {
+    if (mainTab !== "original") return;
+    const filterParam = activeOriginalChip === 'All' ? '' : `&filter=${encodeURIComponent(activeOriginalChip)}`;
+    
+    setOriginalPage(1);
+    setIsLoadingMoreOriginal(true);
+    fetch(`/api/original-movies?page=1&limit=20${filterParam}`)
+      .then(res => res.json())
+      .then(res => {
+        setOriginalMovies(res.data || []);
+        setTotalOriginalMovies(res.total || 0);
+        if (res.categories && res.categories.length > 0) {
+          setOriginalChips(["All", ...res.categories]);
+        }
+        setIsLoadingMoreOriginal(false);
+      })
+      .catch(e => {
+        console.error(e);
+        setIsLoadingMoreOriginal(false);
+      });
+  }, [activeOriginalChip, mainTab]);
+
+  // Infinite Scroll logic for Original Movies
+  const originalSentinelRef = useRef<HTMLDivElement>(null);
+
+  const loadMoreOriginalMovies = useCallback(async () => {
+    if (isLoadingMoreOriginal) return;
+    if (totalOriginalMovies > 0 && originalMovies.length >= totalOriginalMovies) return;
+    setIsLoadingMoreOriginal(true);
+    const nextPage = originalPage + 1;
+    const filterParam = activeOriginalChip === 'All' ? '' : `&filter=${encodeURIComponent(activeOriginalChip)}`;
+    try {
+      const res = await fetch(`/api/original-movies?page=${nextPage}&limit=20${filterParam}`);
+      const data = await res.json();
+      if (data.data && data.data.length > 0) {
+        setOriginalMovies(prev => {
+          const existing = new Set(prev.map(m => m.id));
+          const newItems = data.data.filter((m: Movie) => !existing.has(m.id));
+          return [...prev, ...newItems];
+        });
+        setOriginalPage(nextPage);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingMoreOriginal(false);
+    }
+  }, [isLoadingMoreOriginal, originalPage, activeOriginalChip, totalOriginalMovies, originalMovies.length]);
+
+  useEffect(() => {
+    if (mainTab !== "original") return;
+    const sentinel = originalSentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMoreOriginal && (totalOriginalMovies === 0 || originalMovies.length < totalOriginalMovies)) {
+          loadMoreOriginalMovies();
+        }
+      },
+      { threshold: 0.1, rootMargin: "300px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMoreOriginalMovies, isLoadingMoreOriginal, originalMovies.length, totalOriginalMovies, mainTab]);
+
+  // Fetch unique categories for Web Series
+  useEffect(() => {
+    fetch('/api/web-series?limit=1')
+      .then(res => res.json())
+      .then(data => {
+        if (data.categories && data.categories.length > 0) {
+          setWebSeriesChips(["All", ...data.categories]);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Fetch filtered Web Series when activeWebSeriesChip changes or when mainTab switches to "webseries"
+  useEffect(() => {
+    if (mainTab !== "webseries") return;
+    const categoryParam = activeWebSeriesChip === 'All' ? '' : `&category=${encodeURIComponent(activeWebSeriesChip)}`;
+    
+    setWebSeriesPage(1);
+    setIsLoadingMoreWebSeries(true);
+    fetch(`/api/web-series?page=1&limit=20${categoryParam}`)
+      .then(res => res.json())
+      .then(res => {
+        setWebSeriesList(res.data || []);
+        setTotalWebSeries(res.total || 0);
+        if (res.categories && res.categories.length > 0) {
+          setWebSeriesChips(["All", ...res.categories]);
+        }
+        setIsLoadingMoreWebSeries(false);
+      })
+      .catch(e => {
+        console.error(e);
+        setIsLoadingMoreWebSeries(false);
+      });
+  }, [activeWebSeriesChip, mainTab]);
+
+  // Infinite Scroll logic for Web Series
+  const webSeriesSentinelRef = useRef<HTMLDivElement>(null);
+
+  const loadMoreWebSeries = useCallback(async () => {
+    if (isLoadingMoreWebSeries) return;
+    if (totalWebSeries > 0 && webSeriesList.length >= totalWebSeries) return;
+    setIsLoadingMoreWebSeries(true);
+    const nextPage = webSeriesPage + 1;
+    const categoryParam = activeWebSeriesChip === 'All' ? '' : `&category=${encodeURIComponent(activeWebSeriesChip)}`;
+    try {
+      const res = await fetch(`/api/web-series?page=${nextPage}&limit=20${categoryParam}`);
+      const data = await res.json();
+      if (data.data && data.data.length > 0) {
+        setWebSeriesList(prev => {
+          const existing = new Set(prev.map(s => s.id));
+          const newItems = data.data.filter((s: WebSeriesShow) => !existing.has(s.id));
+          return [...prev, ...newItems];
+        });
+        setWebSeriesPage(nextPage);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingMoreWebSeries(false);
+    }
+  }, [isLoadingMoreWebSeries, webSeriesPage, activeWebSeriesChip, totalWebSeries, webSeriesList.length]);
+
+  useEffect(() => {
+    if (mainTab !== "webseries") return;
+    const sentinel = webSeriesSentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMoreWebSeries && (totalWebSeries === 0 || webSeriesList.length < totalWebSeries)) {
+          loadMoreWebSeries();
+        }
+      },
+      { threshold: 0.1, rootMargin: "300px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMoreWebSeries, isLoadingMoreWebSeries, webSeriesList.length, totalWebSeries, mainTab]);
+
+  // Debounced Search logic (Tab aware)
   useEffect(() => {
     if (searchQuery.trim() === "") {
       setSearchSuggestions([]);
@@ -446,9 +796,31 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/movies?q=${encodeURIComponent(searchQuery)}&limit=10`);
+        let endpoint = `/api/movies?q=${encodeURIComponent(searchQuery)}&limit=10`;
+        if (mainTab === 'original') {
+          endpoint = `/api/original-movies?q=${encodeURIComponent(searchQuery)}&limit=10`;
+        } else if (mainTab === 'webseries') {
+          endpoint = `/api/web-series?search=${encodeURIComponent(searchQuery)}&limit=10`;
+        }
+        const res = await fetch(endpoint);
         const data = await res.json();
-        setSearchSuggestions(data.data);
+        if (mainTab === 'webseries') {
+          const mapped = (data.data || []).map((s: WebSeriesShow) => ({
+            id: s.id,
+            tmdbId: s.tmdbId,
+            title: s.title,
+            image: s.poster,
+            rating: s.rating || '9.0',
+            genre: s.genre || 'Hindi Web Series',
+            category: s.category || 'Hindi Web Series',
+            duration: `${s.totalSeasons || 1} Seasons`,
+            overview: s.overview,
+            type: 'webseries'
+          }));
+          setSearchSuggestions(mapped);
+        } else {
+          setSearchSuggestions(data.data || []);
+        }
       } catch (e) {
         console.error(e);
       } finally {
@@ -457,7 +829,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     }, 300);
     
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, mainTab]);
 
   return (
     <div className="relative w-full max-w-[430px] sm:max-w-[460px] mx-auto h-[100dvh] bg-white text-slate-900 shadow-[0_0_60px_rgba(85,60,251,0.08)] border-x border-purple-100/50 overflow-hidden flex flex-col font-sans">
@@ -569,351 +941,626 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
           </div>
 
           {/* STICKY SEARCH BAR PARENT - 100% Solid White Background from Top 0 (Zero Bleed-Through) */}
-          <div className="sticky top-0 z-30 bg-white transform-gpu pt-2 pb-3 -mx-5 px-5 border-b border-purple-100/70 shadow-[0_4px_20px_rgba(85,60,251,0.05)]">
-            <div className="relative">
-              {/* Classy Animated Shining Line Border Container */}
-              <div className="relative rounded-full p-[1.5px] overflow-hidden isolate group shadow-[0_2px_14px_rgba(85,60,251,0.06)] hover:shadow-[0_4px_22px_rgba(85,60,251,0.12)] focus-within:shadow-[0_4px_24px_rgba(85,60,251,0.16)] transition-all duration-300">
-                {/* Static elegant base border track */}
-                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-200/90 via-purple-100/60 to-purple-200/90" />
+          {/* STICKY SEARCH & TABS CONTAINER - 100% Solid White Background from Top 0 */}
+          <div className="sticky top-0 z-30 bg-white transform-gpu pt-2 pb-2.5 -mx-5 px-5 border-b border-purple-100/70 shadow-[0_4px_20px_rgba(85,60,251,0.05)]">
+            {/* Row 1: Search Bar + Filter Icon Button */}
+            <div className="flex items-center gap-2.5">
+              <div className="relative flex-1">
+                {/* Classy Animated Shining Line Border Container */}
+                <div className="relative rounded-full p-[1.5px] overflow-hidden isolate group shadow-[0_2px_14px_rgba(85,60,251,0.06)] hover:shadow-[0_4px_22px_rgba(85,60,251,0.12)] focus-within:shadow-[0_4px_24px_rgba(85,60,251,0.16)] transition-all duration-300">
+                  {/* Static elegant base border track */}
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-r from-purple-200/90 via-purple-100/60 to-purple-200/90" />
 
-                {/* Animated Shining Line Beam (Smooth Conic Gradient Sweep) */}
-                <div 
-                  className="absolute left-1/2 top-1/2 w-[700px] h-[700px] animate-shining-border pointer-events-none"
-                  style={{
-                    background: "conic-gradient(from 0deg, transparent 0deg, transparent 270deg, rgba(85,60,251,0.2) 295deg, #553cfb 320deg, #9333ea 342deg, #ffffff 357deg, #553cfb 360deg)",
-                  }}
-                />
-
-                {/* Glowing Aura Blur behind Shining Line */}
-                <div 
-                  className="absolute left-1/2 top-1/2 w-[700px] h-[700px] animate-shining-border pointer-events-none blur-[4px] opacity-70"
-                  style={{
-                    background: "conic-gradient(from 0deg, transparent 0deg, transparent 270deg, #553cfb 320deg, #9333ea 342deg, #ffffff 357deg, #553cfb 360deg)",
-                  }}
-                />
-
-                {/* Inner Search Bar Body (Crisp White with Classy Accent) */}
-                <div className="relative flex items-center bg-white hover:bg-[#fafbff] focus-within:bg-white rounded-full px-4 py-2.5 transition-all">
-                  <Search className="text-[#553cfb] w-4 h-4 mr-2.5 flex-shrink-0 transition-transform group-focus-within:scale-110" />
-                  <input
-                    type="text"
-                    placeholder="Search movies, series, actors..."
-                    className="bg-transparent flex-1 outline-none text-[13.5px] font-medium placeholder:text-gray-400 text-gray-800"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                  {/* Animated Shining Line Beam (Smooth Conic Gradient Sweep) */}
+                  <div 
+                    className="absolute left-1/2 top-1/2 w-[700px] h-[700px] animate-shining-border pointer-events-none"
+                    style={{
+                      background: "conic-gradient(from 0deg, transparent 0deg, transparent 270deg, rgba(85,60,251,0.2) 295deg, #553cfb 320deg, #9333ea 342deg, #ffffff 357deg, #553cfb 360deg)",
+                    }}
                   />
-                  {searchQuery && (
-                    <button 
-                      onClick={() => setSearchQuery("")}
-                      className="w-5 h-5 rounded-full bg-purple-50 text-gray-500 flex items-center justify-center hover:bg-purple-100 hover:text-gray-800 transition-colors mr-1.5 cursor-pointer"
-                      aria-label="Clear search"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                  <div className="w-px h-4 bg-purple-200/70 mx-2 flex-shrink-0"></div>
-                  {isSearching ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#553cfb] border-t-transparent flex-shrink-0"></div>
-                  ) : (
-                    <Mic className="text-gray-400 hover:text-[#553cfb] w-4 h-4 flex-shrink-0 cursor-pointer transition-colors" />
-                  )}
-                </div>
-              </div>
 
-              {/* Floating Search Suggestions Dropdown */}
-              {searchQuery && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-white/98 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgba(85,60,251,0.16)] z-40 border border-purple-100/90 max-h-72 overflow-y-auto divide-y divide-purple-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                  {searchSuggestions.length > 0 ? (
-                    searchSuggestions.map((movie) => (
-                      <div
-                        key={movie.id}
-                        className="flex items-center gap-3 p-3 hover:bg-purple-50/60 cursor-pointer transition-colors"
-                        onClick={() => {
-                          setSelectedMovie(movie);
-                          setSearchQuery("");
-                        }}
-                      >
-                        <div className="relative w-11 h-15 rounded-xl overflow-hidden flex-shrink-0 bg-placeholder shadow-xs border border-purple-100/60">
-                          {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-[13px] font-bold text-gray-900 truncate leading-snug">{movie.title}</h4>
-                          <p className="text-[11px] text-[#553cfb] font-medium truncate mt-0.5">{movie.genre || "Cinema"}</p>
-                        </div>
-                        {movie.rating && (
-                          <span className="text-[11px] font-bold text-amber-500 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-0.5 flex-shrink-0">
-                            ★ {movie.rating}
-                          </span>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    !isSearching && <div className="p-4 text-center text-[13px] text-gray-500 font-medium">No movies found matching "{searchQuery}"</div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+                  {/* Glowing Aura Blur behind Shining Line */}
+                  <div 
+                    className="absolute left-1/2 top-1/2 w-[700px] h-[700px] animate-shining-border pointer-events-none blur-[4px] opacity-70"
+                    style={{
+                      background: "conic-gradient(from 0deg, transparent 0deg, transparent 270deg, #553cfb 320deg, #9333ea 342deg, #ffffff 357deg, #553cfb 360deg)",
+                    }}
+                  />
 
-          {/* Filter Chips */}
-          <div className="flex gap-2 mt-4 overflow-x-auto hide-scrollbar -mx-5 px-5 pb-1">
-            {chips.map((chip) => {
-              const isActive = activeChip === chip;
-              return (
-                <button
-                  key={chip}
-                  onClick={() => setActiveChip(chip)}
-                  className={clsx(
-                    "px-4 py-1.5 rounded-full whitespace-nowrap text-[12.5px] font-bold transition-all duration-200 cursor-pointer flex-shrink-0",
-                    isActive
-                      ? "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] text-white shadow-[0_4px_14px_rgba(85,60,251,0.3)] scale-[1.02]"
-                      : "bg-[#f8f9fe] hover:bg-purple-50 text-gray-700 border border-purple-100/70"
-                  )}
-                >
-                  {chip}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Hero Carousel */}
-          {heroMovies.length > 0 && (
-            <div className="mt-5 flex gap-3.5 overflow-x-auto hide-scrollbar -mx-5 px-5 snap-x snap-mandatory pb-2">
-              {heroMovies.map((movie, idx) => (
-                <div 
-                  key={movie.id} 
-                  className="relative h-[215px] w-[88%] rounded-[26px] overflow-hidden flex-shrink-0 snap-center cursor-pointer bg-placeholder shadow-[0_8px_24px_rgba(85,60,251,0.12)] border border-purple-100/50 group active:scale-[0.99] transition-transform"
-                  onClick={() => setSelectedMovie(movie)}
-                >
-                  {movie.image && (
-                    <Image 
-                      src={movie.image} 
-                      alt={movie.title} 
-                      fill 
-                      sizes="(max-width: 640px) 90vw, 420px"
-                      priority={idx === 0}
-                      className="object-cover group-hover:scale-105 transition-transform duration-500 ease-out" 
+                  {/* Inner Search Bar Body (Crisp White with Classy Accent) */}
+                  <div className="relative flex items-center bg-white hover:bg-[#fafbff] focus-within:bg-white rounded-full px-3.5 py-2.5 transition-all">
+                    <Search className="text-[#553cfb] w-4 h-4 mr-2 flex-shrink-0 transition-transform group-focus-within:scale-110" />
+                    <input
+                      type="text"
+                      placeholder="Search movies, series, actors..."
+                      className="bg-transparent flex-1 outline-none text-[13.5px] font-medium placeholder:text-gray-400 text-gray-800 min-w-0"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
-                  )}
-                  {/* Cinematic multi-stop gradient overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/45 to-black/10 pointer-events-none"></div>
-                  
-                  {/* Top Badges */}
-                  <div className="absolute top-3.5 left-3.5 right-3.5 flex items-center justify-between">
-                    <span className="bg-[#553cfb] text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shadow-md">
-                      {movie.quality || "Featured HD"}
-                    </span>
-                    {movie.rating && (
-                      <div className="bg-black/80 text-white text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-white/15">
-                        <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
-                        <span>{movie.rating}</span>
-                      </div>
+                    {searchQuery && (
+                      <button 
+                        onClick={() => setSearchQuery("")}
+                        className="w-5 h-5 rounded-full bg-purple-50 text-gray-500 flex items-center justify-center hover:bg-purple-100 hover:text-gray-800 transition-colors mr-1 cursor-pointer flex-shrink-0"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                    <div className="w-px h-3.5 bg-purple-200/70 mx-1.5 flex-shrink-0"></div>
+                    {isSearching ? (
+                      <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-[#553cfb] border-t-transparent flex-shrink-0"></div>
+                    ) : (
+                      <Mic className="text-gray-400 hover:text-[#553cfb] w-4 h-4 flex-shrink-0 cursor-pointer transition-colors" />
                     )}
                   </div>
+                </div>
 
-                  {/* Bottom Details & Play Button */}
-                  <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end gap-3">
-                    <div className="text-white min-w-0">
-                      <h2 className="text-[17px] font-black leading-tight mb-1 text-white line-clamp-2 drop-shadow-sm">
-                        {movie.title.replace(/\s\(\d{4}\).*$/, '')}
-                      </h2>
-                      <div className="flex items-center gap-2 text-xs font-medium text-purple-200">
-                        <span className="bg-white/25 px-2 py-0.5 rounded-md text-[11px] text-white font-semibold line-clamp-1">
-                          {movie.genre || "Action"}
-                        </span>
-                        {movie.duration && (
-                          <span className="text-[11px] text-gray-300">{movie.duration}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="w-11 h-11 bg-gradient-to-tr from-[#553cfb] to-[#7b46fa] rounded-full flex items-center justify-center flex-shrink-0 shadow-[0_4px_16px_rgba(85,60,251,0.5)] group-hover:scale-110 transition-transform">
-                      <Play className="w-4 h-4 text-white fill-white ml-0.5" />
-                    </div>
+                {/* Floating Search Suggestions Dropdown */}
+                {searchQuery && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white/98 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgba(85,60,251,0.16)] z-40 border border-purple-100/90 max-h-72 overflow-y-auto divide-y divide-purple-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    {searchSuggestions.length > 0 ? (
+                      searchSuggestions.map((movie) => (
+                        <div
+                          key={movie.id}
+                          className="flex items-center gap-3 p-3 hover:bg-purple-50/60 cursor-pointer transition-colors"
+                          onClick={() => {
+                            if (movie.type === 'webseries' || movie.id.startsWith('series_')) {
+                              const foundSeries = webSeriesList.find(s => s.id === movie.id || s.tmdbId === movie.tmdbId);
+                              if (foundSeries) {
+                                setSelectedSeriesForEpisodes(foundSeries);
+                                setActiveSeasonNumber(foundSeries.seasons?.[0]?.seasonNumber || 1);
+                              } else {
+                                fetch(`/api/web-series?id=${movie.id}`)
+                                  .then(r => r.json())
+                                  .then(d => {
+                                    if (d.series) {
+                                      setSelectedSeriesForEpisodes(d.series);
+                                      setActiveSeasonNumber(d.series.seasons?.[0]?.seasonNumber || 1);
+                                    }
+                                  })
+                                  .catch(() => {});
+                              }
+                            } else {
+                              setSelectedMovie(movie);
+                            }
+                            setSearchQuery("");
+                          }}
+                        >
+                          <div className="relative w-11 h-15 rounded-xl overflow-hidden flex-shrink-0 bg-placeholder shadow-xs border border-purple-100/60">
+                            {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-[13px] font-bold text-gray-900 truncate leading-snug">{movie.title}</h4>
+                            <p className="text-[11px] text-[#553cfb] font-medium truncate mt-0.5">{movie.genre || "Cinema"}</p>
+                          </div>
+                          {movie.rating && (
+                            <span className="text-[11px] font-bold text-amber-500 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-0.5 flex-shrink-0">
+                              ★ {movie.rating}
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      !isSearching && <div className="p-4 text-center text-[13px] text-gray-500 font-medium">No results found matching "{searchQuery}"</div>
+                    )}
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                )}
+              </div>
 
-          {/* Popular Section */}
-          {popularMovies.length > 0 && (
-            <div className="mt-8">
-              <div className="flex justify-between items-center mb-3 px-0.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-5 rounded-full bg-[#553cfb]"></div>
-                  <h3 className="text-[18px] font-extrabold text-gray-900 tracking-tight">Popular</h3>
+              {/* Filter Icon Button (opens Category Bottom Sheet) */}
+              <button
+                onClick={() => setShowCategorySheet(true)}
+                className={clsx(
+                  "relative w-[44px] h-[44px] rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer flex-shrink-0 shadow-2xs active:scale-95",
+                  (mainTab === "dubbed" ? activeChip !== "All" : mainTab === "original" ? activeOriginalChip !== "All" : activeWebSeriesChip !== "All")
+                    ? "bg-gradient-to-tr from-[#553cfb] to-[#7b46fa] text-white shadow-[0_4px_14px_rgba(85,60,251,0.35)]"
+                    : "bg-[#f8f9fe] hover:bg-purple-100/70 text-gray-700 hover:text-[#553cfb] border border-purple-100"
+                )}
+                aria-label="Filter Categories"
+                title="Filter by Category"
+              >
+                <SlidersHorizontal className="w-4.5 h-4.5" />
+                {(mainTab === "dubbed" ? activeChip !== "All" : mainTab === "original" ? activeOriginalChip !== "All" : activeWebSeriesChip !== "All") && (
+                  <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-400 border-2 border-white rounded-full animate-pulse" />
+                )}
+              </button>
+            </div>
+
+            {/* Row 2: 3 Sliding Tabs (Dubbed Movies vs Original Movies vs Web Series) */}
+            <div className="mt-2.5 p-1 bg-[#f4f5fa] rounded-[20px] flex relative border border-purple-100/60">
+              {/* Tab 1: Dubbed Movies */}
+              <button
+                onClick={() => setMainTab("dubbed")}
+                className={clsx(
+                  "relative flex-1 py-2 rounded-[16px] text-[12px] sm:text-[13px] font-bold transition-colors z-10 cursor-pointer flex items-center justify-center gap-1 sm:gap-1.5",
+                  mainTab === "dubbed" ? "text-[#553cfb]" : "text-gray-500 hover:text-gray-800"
+                )}
+              >
+                {mainTab === "dubbed" && (
+                  <motion.div
+                    layoutId="activeMainTabPill"
+                    transition={{ type: "spring", bounce: 0.18, duration: 0.4 }}
+                    className="absolute inset-0 bg-white rounded-[16px] shadow-[0_2px_10px_rgba(85,60,251,0.12)] border border-purple-100/80 -z-10"
+                  />
+                )}
+                <Film className="w-3.5 h-3.5" />
+                <span>Dubbed</span>
+              </button>
+
+              {/* Tab 2: Original Movies */}
+              <button
+                onClick={() => setMainTab("original")}
+                className={clsx(
+                  "relative flex-1 py-2 rounded-[16px] text-[12px] sm:text-[13px] font-bold transition-colors z-10 cursor-pointer flex items-center justify-center gap-1 sm:gap-1.5",
+                  mainTab === "original" ? "text-[#553cfb]" : "text-gray-500 hover:text-gray-800"
+                )}
+              >
+                {mainTab === "original" && (
+                  <motion.div
+                    layoutId="activeMainTabPill"
+                    transition={{ type: "spring", bounce: 0.18, duration: 0.4 }}
+                    className="absolute inset-0 bg-white rounded-[16px] shadow-[0_2px_10px_rgba(85,60,251,0.12)] border border-purple-100/80 -z-10"
+                  />
+                )}
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Original</span>
+              </button>
+
+              {/* Tab 3: Web Series */}
+              <button
+                onClick={() => setMainTab("webseries")}
+                className={clsx(
+                  "relative flex-1 py-2 rounded-[16px] text-[12px] sm:text-[13px] font-bold transition-colors z-10 cursor-pointer flex items-center justify-center gap-1 sm:gap-1.5",
+                  mainTab === "webseries" ? "text-[#553cfb]" : "text-gray-500 hover:text-gray-800"
+                )}
+              >
+                {mainTab === "webseries" && (
+                  <motion.div
+                    layoutId="activeMainTabPill"
+                    transition={{ type: "spring", bounce: 0.18, duration: 0.4 }}
+                    className="absolute inset-0 bg-white rounded-[16px] shadow-[0_2px_10px_rgba(85,60,251,0.12)] border border-purple-100/80 -z-10"
+                  />
+                )}
+                <Tv className="w-3.5 h-3.5" />
+                <span>Web Series</span>
+              </button>
+            </div>
+
+            {/* Active Category Filter Indicator */}
+            {((mainTab === "dubbed" && activeChip !== "All") || (mainTab === "original" && activeOriginalChip !== "All") || (mainTab === "webseries" && activeWebSeriesChip !== "All")) && (
+              <div className="flex items-center justify-between mt-2 pt-0.5 px-0.5">
+                <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-500">
+                  <span>Showing:</span>
+                  <span className="bg-[#553cfb]/10 text-[#553cfb] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    {mainTab === "dubbed" ? activeChip : mainTab === "original" ? activeOriginalChip : activeWebSeriesChip}
+                  </span>
                 </div>
-                <button 
-                  onClick={() => setViewingCategory({ title: "Popular", data: popularMovies })}
-                  className="text-[12px] text-[#553cfb] hover:text-[#4318d1] font-bold flex items-center gap-0.5 transition-colors cursor-pointer"
+                <button
+                  onClick={() => {
+                    if (mainTab === "dubbed") setActiveChip("All");
+                    else if (mainTab === "original") setActiveOriginalChip("All");
+                    else setActiveWebSeriesChip("All");
+                  }}
+                  className="text-[11px] font-bold text-gray-400 hover:text-red-500 transition-colors cursor-pointer flex items-center gap-0.5"
                 >
-                  See All <span className="text-base leading-none">&rsaquo;</span>
+                  <X className="w-3 h-3" /> Clear Filter
                 </button>
-              </div>
-
-              <div className="flex gap-3.5 overflow-x-auto hide-scrollbar -mx-5 px-5 pb-2">
-                {popularMovies.map((movie) => (
-                  <div 
-                    key={movie.id} 
-                    className="w-[136px] flex-shrink-0 cursor-pointer group active:scale-[0.98] transition-transform" 
-                    onClick={() => setSelectedMovie(movie)}
-                  >
-                    <div className="relative h-[195px] rounded-[22px] overflow-hidden mb-2 bg-placeholder shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
-                      {movie.image && (
-                        <Image 
-                          src={movie.image} 
-                          alt={movie.title} 
-                          fill 
-                          sizes="140px"
-                          loading="lazy"
-                          className="object-cover group-hover:scale-105 transition-transform duration-300" 
-                        />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                      {movie.rating && (
-                        <div className="absolute top-2 right-2 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
-                          <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
-                        </div>
-                      )}
-                      {movie.quality && (
-                        <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
-                          {movie.quality}
-                        </div>
-                      )}
-                    </div>
-                    <h4 className="font-bold text-[13px] text-gray-900 leading-snug truncate group-hover:text-[#553cfb] transition-colors">
-                      {movie.title.replace(/\s\(\d{4}\).*$/, '')}
-                    </h4>
-                    <p className="text-[11px] text-gray-500 mt-0.5 truncate">{movie.genre || "Movie"}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Trending Now Section */}
-          {trendingMovies.length > 0 && (
-            <div className="mt-8">
-              <div className="flex justify-between items-center mb-3 px-0.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-5 rounded-full bg-gradient-to-b from-[#553cfb] to-[#a855f7]"></div>
-                  <h3 className="text-[18px] font-extrabold text-gray-900 tracking-tight flex items-center gap-1.5">
-                    <span>Trending Now</span>
-                    <Flame className="w-4 h-4 text-orange-500 fill-orange-500" />
-                  </h3>
-                </div>
-                <button 
-                  onClick={() => setViewingCategory({ title: "Trending Now", data: trendingMovies })}
-                  className="text-[12px] text-[#553cfb] hover:text-[#4318d1] font-bold flex items-center gap-0.5 transition-colors cursor-pointer"
-                >
-                  See All <span className="text-base leading-none">&rsaquo;</span>
-                </button>
-              </div>
-
-              <div className="flex gap-3.5 overflow-x-auto hide-scrollbar -mx-5 px-5 pb-3">
-                {trendingMovies.map((movie) => (
-                  <div 
-                    key={movie.id} 
-                    className="w-[136px] flex-shrink-0 cursor-pointer group active:scale-[0.98] transition-transform" 
-                    onClick={() => setSelectedMovie(movie)}
-                  >
-                    <div className="relative h-[195px] rounded-[22px] overflow-hidden mb-2 bg-placeholder shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
-                      {movie.image && (
-                        <Image 
-                          src={movie.image} 
-                          alt={movie.title} 
-                          fill 
-                          sizes="140px"
-                          loading="lazy"
-                          className="object-cover group-hover:scale-105 transition-transform duration-300" 
-                        />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                      {movie.rating && (
-                        <div className="absolute top-2 right-2 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
-                          <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
-                        </div>
-                      )}
-                      {movie.quality && (
-                        <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
-                          {movie.quality}
-                        </div>
-                      )}
-                    </div>
-                    <h4 className="font-bold text-[13px] text-gray-900 leading-snug truncate group-hover:text-[#553cfb] transition-colors">
-                      {movie.title.replace(/\s\(\d{4}\).*$/, '')}
-                    </h4>
-                    <p className="text-[11px] text-gray-500 mt-0.5 truncate">{movie.genre || "Movie"}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* All Movies Grid Section (Infinite Scroll with IntersectionObserver) */}
-          <div className="mt-8 pb-10">
-            <div className="flex items-center justify-between mb-4 px-0.5">
-              <div className="flex items-center gap-1.5">
-                <div className="w-2 h-5 rounded-full bg-[#553cfb]"></div>
-                <h3 className="text-[18px] font-extrabold text-gray-900 tracking-tight">
-                  All Movies {totalMovies > 0 && <span className="text-[13px] font-normal text-gray-400">({totalMovies})</span>}
-                </h3>
-              </div>
-              <span className="text-[11px] font-bold text-[#553cfb] bg-[#553cfb]/10 px-2.5 py-0.5 rounded-full">
-                Live Catalog
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3.5">
-              {allMovies.map((movie) => (
-                <div 
-                  key={movie.id} 
-                  className="cursor-pointer flex flex-col group active:scale-[0.98] transition-transform" 
-                  onClick={() => setSelectedMovie(movie)}
-                >
-                  <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
-                    {movie.image && (
-                      <Image 
-                        src={movie.image} 
-                        alt={movie.title} 
-                        fill 
-                        sizes="(max-width: 640px) 45vw, 200px"
-                        loading="lazy"
-                        className="object-cover group-hover:scale-105 transition-transform duration-300" 
-                      />
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                    {movie.rating && (
-                      <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
-                        <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
-                      </div>
-                    )}
-                    {movie.quality && (
-                      <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
-                        {movie.quality}
-                      </div>
-                    )}
-                  </div>
-                  <h4 className="font-bold text-[13px] text-gray-900 leading-snug line-clamp-1 group-hover:text-[#553cfb] transition-colors">
-                    {movie.title.replace(/\s\(\d{4}\).*$/, '')}
-                  </h4>
-                  <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{movie.genre || "Movie"}</p>
-                </div>
-              ))}
-            </div>
-            
-            {/* Infinite Scroll Sentinel - Triggers loading asynchronously */}
-            <div ref={sentinelRef} className="h-6 w-full pointer-events-none" />
-
-            {/* Loading spinner for infinite scroll */}
-            {isLoadingMore && (
-              <div className="flex flex-col justify-center items-center py-6 mt-2">
-                <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
-                <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more titles...</span>
               </div>
             )}
           </div>
+
+          {/* MAIN TAB CONTENT */}
+          {mainTab === "dubbed" ? (
+            /* Dubbed Movies Grid (Direct Clean Grid) */
+            <div className="mt-4 pb-10">
+              <div className="flex items-center justify-between mb-3 px-0.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-5 rounded-full bg-[#553cfb]"></div>
+                  <h3 className="text-[17px] font-extrabold text-gray-900 tracking-tight">
+                    {activeChip === "All" ? "All Movies" : activeChip} {totalMovies > 0 && <span className="text-[13px] font-normal text-gray-400">({totalMovies})</span>}
+                  </h3>
+                </div>
+                <span className="text-[10.5px] font-bold text-[#553cfb] bg-[#553cfb]/10 px-2.5 py-0.5 rounded-full">
+                  Live Catalog
+                </span>
+              </div>
+
+              {allMovies.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3.5">
+                  {allMovies.map((movie) => (
+                    <div 
+                      key={movie.id} 
+                      className="cursor-pointer flex flex-col group active:scale-[0.98] transition-transform" 
+                      onClick={() => setSelectedMovie(movie)}
+                    >
+                      <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
+                        {movie.image && (
+                          <Image 
+                            src={movie.image} 
+                            alt={movie.title} 
+                            fill 
+                            sizes="(max-width: 640px) 45vw, 200px"
+                            loading="lazy"
+                            className="object-cover group-hover:scale-105 transition-transform duration-300" 
+                          />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        {movie.rating && (
+                          <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
+                            <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
+                          </div>
+                        )}
+                        {movie.quality && (
+                          <div className="absolute bottom-2 left-2 bg-[#553cfb] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
+                            {movie.quality}
+                          </div>
+                        )}
+                      </div>
+                      <h4 className="font-bold text-[13px] text-gray-900 leading-snug line-clamp-1 group-hover:text-[#553cfb] transition-colors">
+                        {movie.title.replace(/\s\(\d{4}\).*$/, '')}
+                      </h4>
+                      <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{movie.genre || "Movie"}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : !isLoadingMore ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                  <div className="w-16 h-16 bg-purple-50 rounded-full border border-purple-100 flex items-center justify-center mb-3 text-[#553cfb]">
+                    <Film className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-sm font-bold text-gray-800 mb-1">No movies found</h4>
+                  <p className="text-xs text-gray-400">Try choosing a different category or clearing filters.</p>
+                </div>
+              ) : null}
+              
+              {/* Infinite Scroll Sentinel - Triggers loading asynchronously */}
+              <div ref={sentinelRef} className="h-6 w-full pointer-events-none" />
+
+              {/* Loading spinner for infinite scroll */}
+              {isLoadingMore && (
+                <div className="flex flex-col justify-center items-center py-6 mt-2">
+                  <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
+                  <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more titles...</span>
+                </div>
+              )}
+            </div>
+          ) : mainTab === "original" ? (
+            /* Original Movies Grid & Continue Watching */
+            <div className="mt-4 pb-10">
+              {/* Continue Watching Section (Netflix Style with Progress & Resume) */}
+              {watchHistoryList.length > 0 && (
+                <div className="mb-6 bg-gradient-to-b from-purple-50/50 via-white to-transparent p-3 rounded-[24px] border border-purple-100/70 shadow-2xs">
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb]">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-[15px] font-extrabold text-gray-900 leading-tight flex items-center gap-1.5">
+                          Continue Watching
+                          <span className="text-[10px] font-extrabold text-white bg-gradient-to-r from-[#553cfb] to-[#7b46fa] px-2 py-0.5 rounded-full shadow-2xs">
+                            {watchHistoryList.length}
+                          </span>
+                        </h3>
+                        <p className="text-[11px] text-gray-400 font-medium">Pick up right where you left off</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (confirm("Clear all continue watching history?")) {
+                          clearWatchHistory();
+                        }
+                      }}
+                      className="text-[11px] font-semibold text-gray-400 hover:text-red-500 transition-colors cursor-pointer px-2 py-1 rounded-lg hover:bg-red-50"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  {/* Horizontal Scroll Cards */}
+                  <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1 pt-0.5 -mx-1 px-1">
+                    {watchHistoryList.map((item) => (
+                      <div
+                        key={item.id}
+                        className="relative flex-shrink-0 w-[140px] group cursor-pointer active:scale-98 transition-transform"
+                        onClick={() => handleStartStreaming(item)}
+                      >
+                        <div className="relative aspect-[2/3] w-full rounded-[18px] overflow-hidden shadow-[0_4px_14px_rgba(0,0,0,0.12)] border border-purple-100/80 bg-gray-950">
+                          {item.image ? (
+                            <Image
+                              src={item.image}
+                              alt={item.title}
+                              fill
+                              sizes="140px"
+                              className="object-cover group-hover:scale-105 transition-transform duration-300 opacity-90"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-[#553cfb]/10 text-[#553cfb]">
+                              <Film className="w-8 h-8" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none" />
+
+                          {/* Center Play Button Overlay */}
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-9 h-9 rounded-full bg-[#553cfb]/90 hover:bg-[#553cfb] text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                              <Play className="w-4 h-4 fill-white ml-0.5" />
+                            </div>
+                          </div>
+
+                          {/* Delete Item Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeWatchHistoryItem(item.id);
+                            }}
+                            className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/65 hover:bg-red-600 text-white flex items-center justify-center transition-colors cursor-pointer"
+                            title="Remove"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Bottom Progress Bar & Indicator */}
+                          <div className="absolute bottom-0 left-0 right-0 p-2 pt-0">
+                            <div className="flex items-center justify-between text-[9.5px] font-bold text-white mb-1">
+                              <span className="text-emerald-400 font-extrabold">{item.progressPercent}% watched</span>
+                              <span className="text-gray-300 text-[9px]">{item.duration || "Cinema"}</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-[#553cfb] via-[#7b46fa] to-emerald-400 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, Math.max(8, item.progressPercent))}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <h4 className="font-bold text-[12px] text-gray-900 leading-snug line-clamp-1 mt-1.5 group-hover:text-[#553cfb] transition-colors">
+                          {item.title}
+                        </h4>
+                        <p className="text-[10.5px] text-gray-500 line-clamp-1">
+                          {item.category || item.genre || "Original Cinema"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between mb-3 px-0.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-5 rounded-full bg-gradient-to-b from-[#553cfb] to-[#7b46fa]"></div>
+                  <h3 className="text-[17px] font-extrabold text-gray-900 tracking-tight">
+                    {activeOriginalChip === "All" ? "Original Movies" : `${activeOriginalChip} Cinema`} {totalOriginalMovies > 0 && <span className="text-[13px] font-normal text-gray-400">({totalOriginalMovies})</span>}
+                  </h3>
+                </div>
+                <span className="text-[10.5px] font-bold text-white bg-gradient-to-r from-[#553cfb] to-[#7b46fa] px-2.5 py-0.5 rounded-full shadow-2xs">
+                  Streaming Live
+                </span>
+              </div>
+
+              {originalMovies.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3.5">
+                  {originalMovies.map((movie) => (
+                    <div 
+                      key={movie.id} 
+                      className="cursor-pointer flex flex-col group active:scale-[0.98] transition-transform" 
+                      onClick={() => setSelectedMovie(movie)}
+                    >
+                      <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
+                        {movie.image && (
+                          <Image 
+                            src={movie.image} 
+                            alt={movie.title} 
+                            fill 
+                            sizes="(max-width: 640px) 45vw, 200px"
+                            loading="lazy"
+                            className="object-cover group-hover:scale-105 transition-transform duration-300" 
+                          />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        {movie.rating && (
+                          <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
+                            <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
+                          </div>
+                        )}
+                        {movie.languageCode && (
+                          <div className="absolute bottom-2 left-2 bg-gradient-to-r from-[#553cfb] to-[#7b46fa] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs uppercase">
+                            {movie.category || movie.languageCode}
+                          </div>
+                        )}
+                      </div>
+                      <h4 className="font-bold text-[13px] text-gray-900 leading-snug line-clamp-1 group-hover:text-[#553cfb] transition-colors">
+                        {movie.title}
+                      </h4>
+                      <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{movie.duration ? `${movie.duration} • ` : ""}{movie.category || "Original Cinema"}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : !isLoadingMoreOriginal ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                  <div className="w-16 h-16 bg-purple-50 rounded-full border border-purple-100 flex items-center justify-center mb-3 text-[#553cfb]">
+                    <Film className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-sm font-bold text-gray-800 mb-1">No original movies found</h4>
+                  <p className="text-xs text-gray-400">Try choosing another category or import new original movies in /admin.</p>
+                </div>
+              ) : null}
+              
+              {/* Infinite Scroll Sentinel for Original Movies */}
+              <div ref={originalSentinelRef} className="h-6 w-full pointer-events-none" />
+
+              {/* Loading spinner for original movies */}
+              {isLoadingMoreOriginal && (
+                <div className="flex flex-col justify-center items-center py-6 mt-2">
+                  <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
+                  <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more original titles...</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Web Series Grid */
+            <div className="mt-4 pb-10">
+              {/* Continue Watching Section for Web Series */}
+              {watchHistoryList.length > 0 && (
+                <div className="mb-6 bg-gradient-to-b from-purple-50/50 via-white to-transparent p-3 rounded-[24px] border border-purple-100/70 shadow-2xs">
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb]">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-[15px] font-extrabold text-gray-900 leading-tight flex items-center gap-1.5">
+                          Continue Watching
+                          <span className="text-[10px] font-extrabold text-white bg-gradient-to-r from-[#553cfb] to-[#7b46fa] px-2 py-0.5 rounded-full shadow-2xs">
+                            {watchHistoryList.length}
+                          </span>
+                        </h3>
+                        <p className="text-[11px] text-gray-400 font-medium">Resume where you left off</p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setDrawerTab("history");
+                        setIsDrawerOpen(true);
+                      }}
+                      className="text-[11.5px] font-bold text-[#553cfb] hover:text-[#462ee6] cursor-pointer"
+                    >
+                      View All
+                    </button>
+                  </div>
+
+                  <div className="flex items-start gap-3 overflow-x-auto pb-2 pt-1 hide-scrollbar">
+                    {watchHistoryList.slice(0, 8).map((item) => (
+                      <div
+                        key={item.id}
+                        className="group flex-shrink-0 w-36 sm:w-40 cursor-pointer active:scale-[0.98] transition-transform"
+                        onClick={() => handleStartStreaming(item)}
+                      >
+                        <div className="relative aspect-video rounded-2xl overflow-hidden shadow-xs border border-purple-100 bg-gray-950">
+                          {item.image && (
+                            <Image
+                              src={item.image}
+                              alt={item.title}
+                              fill
+                              sizes="160px"
+                              className="object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          )}
+                          <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                            <div className="w-9 h-9 rounded-full bg-white/95 text-[#553cfb] flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                              <Play className="w-4 h-4 fill-current ml-0.5" />
+                            </div>
+                          </div>
+
+                          <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/90 to-transparent">
+                            <div className="flex items-center justify-between text-[9.5px] font-bold text-white/90 mb-1 px-0.5">
+                              <span>{item.progressPercent}% Watched</span>
+                              <span>{item.duration || "Resume"}</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-white/30 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-[#553cfb] via-[#7b46fa] to-emerald-400 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, Math.max(8, item.progressPercent))}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <h4 className="font-bold text-[12px] text-gray-900 leading-snug line-clamp-1 mt-1.5 group-hover:text-[#553cfb] transition-colors">
+                          {item.title}
+                        </h4>
+                        <p className="text-[10.5px] text-gray-500 line-clamp-1">
+                          {item.category || item.genre || "Hindi Web Series"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between mb-3 px-0.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-5 rounded-full bg-gradient-to-b from-indigo-500 to-purple-600"></div>
+                  <h3 className="text-[17px] font-extrabold text-gray-900 tracking-tight">
+                    {activeWebSeriesChip === "All" ? "Web Series" : activeWebSeriesChip} {totalWebSeries > 0 && <span className="text-[13px] font-normal text-gray-400">({totalWebSeries})</span>}
+                  </h3>
+                </div>
+                <span className="text-[10.5px] font-bold text-white bg-gradient-to-r from-indigo-600 to-purple-600 px-2.5 py-0.5 rounded-full shadow-2xs">
+                  Hindi Web Series
+                </span>
+              </div>
+
+              {webSeriesList.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3.5">
+                  {webSeriesList.map((series) => (
+                    <div 
+                      key={series.id} 
+                      className="cursor-pointer flex flex-col group active:scale-[0.98] transition-transform" 
+                      onClick={() => {
+                        setSelectedSeriesForEpisodes(series);
+                        setActiveSeasonNumber(series.seasons?.[0]?.seasonNumber || 1);
+                      }}
+                    >
+                      <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
+                        {series.poster && (
+                          <Image 
+                            src={series.poster} 
+                            alt={series.title} 
+                            fill 
+                            sizes="(max-width: 640px) 45vw, 200px"
+                            loading="lazy"
+                            className="object-cover group-hover:scale-105 transition-transform duration-300" 
+                          />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        
+                        {series.rating && (
+                          <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
+                            <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {series.rating}
+                          </div>
+                        )}
+                        <div className="absolute top-2.5 left-2.5 bg-[#553cfb]/90 text-white text-[9.5px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs backdrop-blur-xs">
+                          <Tv className="w-2.5 h-2.5" /> Series
+                        </div>
+                        
+                        <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
+                          <div className="bg-black/70 backdrop-blur-xs text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md border border-white/10">
+                            {series.totalSeasons} {series.totalSeasons === 1 ? 'Season' : 'Seasons'} • {series.totalEpisodes} Eps
+                          </div>
+                        </div>
+                      </div>
+                      <h4 className="font-bold text-[13px] text-gray-900 leading-snug line-clamp-1 group-hover:text-[#553cfb] transition-colors">
+                        {series.title}
+                      </h4>
+                      <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">
+                        {series.category || series.genre || "Hindi Web Series"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : !isLoadingMoreWebSeries ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                  <div className="w-16 h-16 bg-purple-50 rounded-full border border-purple-100 flex items-center justify-center mb-3 text-[#553cfb]">
+                    <Tv className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-sm font-bold text-gray-800 mb-1">No web series found</h4>
+                  <p className="text-xs text-gray-400">Import web series HTML rows in /admin to see them here.</p>
+                </div>
+              ) : null}
+
+              {/* Infinite Scroll Sentinel for Web Series */}
+              <div ref={webSeriesSentinelRef} className="h-6 w-full pointer-events-none" />
+
+              {isLoadingMoreWebSeries && (
+                <div className="flex flex-col justify-center items-center py-6 mt-2">
+                  <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
+                  <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more series...</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1072,34 +1719,55 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2 pb-2 mt-auto">
-                    <button 
-                      onClick={() => {
-                        setSelectedAction("watch");
-                        setShowDownloadOptions(true);
-                      }}
-                      className="flex-1 bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-105 active:scale-[0.98] text-white rounded-[18px] py-3.5 flex items-center justify-center gap-1.5 font-bold text-[13.5px] transition-all shadow-[0_4px_16px_rgba(85,60,251,0.3)] cursor-pointer"
-                    >
-                      <Play className="w-4 h-4 fill-current ml-0.5" /> Watch Now
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setSelectedAction("download");
-                        setShowDownloadOptions(true);
-                      }}
-                      className="flex-1 bg-[#f8f9fe] hover:bg-purple-100/50 border border-purple-100 text-gray-800 rounded-[18px] py-3.5 flex items-center justify-center gap-1.5 font-bold text-[13.5px] transition-all active:scale-[0.98] cursor-pointer"
-                    >
-                      <Download className="w-4 h-4 text-[#553cfb]" /> Download HD
-                    </button>
-                    <button
-                      onClick={() => setShowShareSheet(true)}
-                      className="w-[50px] h-[50px] rounded-[18px] bg-purple-50 hover:bg-purple-100/80 border border-purple-200/80 flex items-center justify-center text-[#553cfb] transition-all active:scale-95 cursor-pointer shadow-2xs flex-shrink-0"
-                      aria-label="Share movie"
-                      title="Share movie with friends"
-                    >
-                      <Share2 className="w-5 h-5" />
-                    </button>
-                  </div>
+                  {selectedMovie.isOriginal ? (
+                    <div className="flex items-center gap-2 pb-2 mt-auto">
+                      <button 
+                        onClick={() => {
+                          handleStartStreaming(selectedMovie, 0);
+                        }}
+                        className="flex-1 bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-105 active:scale-[0.98] text-white rounded-[18px] py-3.5 flex items-center justify-center gap-2 font-bold text-[14px] transition-all shadow-[0_4px_16px_rgba(85,60,251,0.3)] cursor-pointer"
+                      >
+                        <Play className="w-4.5 h-4.5 fill-current ml-0.5" /> Watch Online Live
+                      </button>
+                      <button
+                        onClick={() => setShowShareSheet(true)}
+                        className="w-[50px] h-[50px] rounded-[18px] bg-purple-50 hover:bg-purple-100/80 border border-purple-200/80 flex items-center justify-center text-[#553cfb] transition-all active:scale-95 cursor-pointer shadow-2xs flex-shrink-0"
+                        aria-label="Share movie"
+                        title="Share movie with friends"
+                      >
+                        <Share2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 pb-2 mt-auto">
+                      <button 
+                        onClick={() => {
+                          setSelectedAction("watch");
+                          setShowDownloadOptions(true);
+                        }}
+                        className="flex-1 bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-105 active:scale-[0.98] text-white rounded-[18px] py-3.5 flex items-center justify-center gap-1.5 font-bold text-[13.5px] transition-all shadow-[0_4px_16px_rgba(85,60,251,0.3)] cursor-pointer"
+                      >
+                        <Play className="w-4 h-4 fill-current ml-0.5" /> Watch Now
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setSelectedAction("download");
+                          setShowDownloadOptions(true);
+                        }}
+                        className="flex-1 bg-[#f8f9fe] hover:bg-purple-100/50 border border-purple-100 text-gray-800 rounded-[18px] py-3.5 flex items-center justify-center gap-1.5 font-bold text-[13.5px] transition-all active:scale-[0.98] cursor-pointer"
+                      >
+                        <Download className="w-4 h-4 text-[#553cfb]" /> Download HD
+                      </button>
+                      <button
+                        onClick={() => setShowShareSheet(true)}
+                        className="w-[50px] h-[50px] rounded-[18px] bg-purple-50 hover:bg-purple-100/80 border border-purple-200/80 flex items-center justify-center text-[#553cfb] transition-all active:scale-95 cursor-pointer shadow-2xs flex-shrink-0"
+                        aria-label="Share movie"
+                        title="Share movie with friends"
+                      >
+                        <Share2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -1224,6 +1892,393 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
         )}
       </AnimatePresence>
 
+      {/* Category Filter Bottom Sheet Modal */}
+      <AnimatePresence>
+        {showCategorySheet && (
+          <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCategorySheet(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-xs"
+            />
+
+            {/* Bottom Sheet */}
+            <motion.div
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 28, stiffness: 280 }}
+              className="relative w-full max-w-[430px] sm:max-w-md bg-white rounded-t-[32px] sm:rounded-[28px] p-5 pb-8 z-10 shadow-2xl border-t sm:border border-purple-100 max-h-[85vh] flex flex-col"
+            >
+              {/* Grab handle */}
+              <div className="w-10 h-1.5 bg-gray-200 rounded-full mx-auto mb-3 flex-shrink-0" />
+
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-purple-50 flex-shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-[14px] bg-gradient-to-tr from-[#553cfb] to-[#7b46fa] flex items-center justify-center text-white shadow-xs">
+                    <SlidersHorizontal className="w-4.5 h-4.5" />
+                  </div>
+                  <div>
+                    <h3 className="text-[15px] font-extrabold text-gray-900 leading-tight">Filter by Category</h3>
+                    <p className="text-[11px] text-gray-500 font-medium">
+                      Select a category to explore movies
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCategorySheet(false)}
+                  className="w-8 h-8 rounded-full bg-[#f8f9fe] hover:bg-gray-200 text-gray-500 flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Category Options Grid */}
+              <div className="flex-1 overflow-y-auto hide-scrollbar py-4 space-y-2 max-h-[50vh]">
+                {(mainTab === "dubbed" ? chips : mainTab === "original" ? originalChips : webSeriesChips).map((chip) => {
+                  const isSelected = (mainTab === "dubbed" ? activeChip : mainTab === "original" ? activeOriginalChip : activeWebSeriesChip) === chip;
+                  return (
+                    <button
+                      key={chip}
+                      onClick={() => {
+                        if (mainTab === "dubbed") {
+                          setActiveChip(chip);
+                        } else if (mainTab === "original") {
+                          setActiveOriginalChip(chip);
+                        } else {
+                          setActiveWebSeriesChip(chip);
+                        }
+                        setShowCategorySheet(false);
+                      }}
+                      className={clsx(
+                        "w-full text-left px-4 py-3 rounded-[18px] text-[13.5px] font-bold transition-all flex items-center justify-between cursor-pointer active:scale-[0.99]",
+                        isSelected
+                          ? "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] text-white shadow-[0_4px_14px_rgba(85,60,251,0.25)]"
+                          : "bg-[#f8f9fe] hover:bg-purple-50 text-gray-700 hover:text-[#553cfb] border border-purple-100/60"
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={clsx(
+                            "w-2 h-2 rounded-full",
+                            isSelected ? "bg-white" : "bg-purple-300"
+                          )}
+                        />
+                        <span>{chip === "All" ? (mainTab === "dubbed" ? "All Movies & Shows" : mainTab === "original" ? "All Original Movies" : "All Web Series") : chip}</span>
+                      </div>
+                      {isSelected && (
+                        <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+                          <Check className="w-3.5 h-3.5 text-white" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Reset / Footer */}
+              {((mainTab === "dubbed" && activeChip !== "All") || (mainTab === "original" && activeOriginalChip !== "All") || (mainTab === "webseries" && activeWebSeriesChip !== "All")) && (
+                <div className="pt-3 border-t border-purple-50 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      if (mainTab === "dubbed") setActiveChip("All");
+                      else if (mainTab === "original") setActiveOriginalChip("All");
+                      else setActiveWebSeriesChip("All");
+                      setShowCategorySheet(false);
+                    }}
+                    className="w-full py-3 rounded-[16px] bg-[#f8f9fe] hover:bg-red-50 text-gray-600 hover:text-red-600 font-bold text-[13px] border border-purple-100/60 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Reset to All Categories</span>
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Web Series Season & Episode Selector Drawer */}
+      <AnimatePresence>
+        {selectedSeriesForEpisodes && (
+          <div className="fixed inset-0 z-[75] flex items-end justify-center p-0 sm:p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedSeriesForEpisodes(null)}
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            />
+
+            {/* Bottom Sheet Modal */}
+            <motion.div
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 28, stiffness: 280 }}
+              className="relative w-full max-w-[430px] sm:max-w-md bg-white rounded-t-[32px] sm:rounded-[28px] p-5 pb-6 z-10 shadow-2xl border-t sm:border border-purple-100 max-h-[90vh] flex flex-col"
+            >
+              {/* Grab handle */}
+              <div className="w-10 h-1.5 bg-gray-200 rounded-full mx-auto mb-3 flex-shrink-0" />
+
+              {/* Show Header */}
+              <div className="flex items-start justify-between pb-3 border-b border-purple-50 flex-shrink-0">
+                <div className="flex items-start gap-3 min-w-0 pr-2">
+                  <div className="relative w-14 h-20 rounded-xl overflow-hidden shadow-xs border border-purple-100 flex-shrink-0 bg-gray-900">
+                    {selectedSeriesForEpisodes.poster && (
+                      <Image
+                        src={selectedSeriesForEpisodes.poster}
+                        alt={selectedSeriesForEpisodes.title}
+                        fill
+                        className="object-cover"
+                      />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider bg-purple-50 text-[#553cfb] px-2 py-0.5 rounded-full border border-purple-200">
+                        {selectedSeriesForEpisodes.category || "Hindi Web Series"}
+                      </span>
+                      {selectedSeriesForEpisodes.rating && (
+                        <span className="text-[10px] font-bold bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                          ⭐ {selectedSeriesForEpisodes.rating}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-base font-black text-gray-900 leading-tight line-clamp-2">
+                      {selectedSeriesForEpisodes.title}
+                    </h3>
+                    <p className="text-[11.5px] text-gray-500 font-medium mt-1">
+                      {selectedSeriesForEpisodes.totalSeasons} Seasons • {selectedSeriesForEpisodes.totalEpisodes} Total Episodes
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setSelectedSeriesForEpisodes(null)}
+                  className="w-8 h-8 rounded-full bg-[#f8f9fe] hover:bg-gray-200 text-gray-500 flex items-center justify-center cursor-pointer transition-colors flex-shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Season Selector Tabs */}
+              {selectedSeriesForEpisodes.seasons && selectedSeriesForEpisodes.seasons.length > 0 && (
+                <div className="py-3 flex items-center gap-2 overflow-x-auto hide-scrollbar border-b border-purple-50 flex-shrink-0">
+                  {selectedSeriesForEpisodes.seasons.map((season) => {
+                    const isSeasonActive = season.seasonNumber === activeSeasonNumber;
+                    return (
+                      <button
+                        key={season.seasonNumber}
+                        onClick={() => setActiveSeasonNumber(season.seasonNumber)}
+                        className={clsx(
+                          "px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex-shrink-0 flex items-center gap-1.5",
+                          isSeasonActive
+                            ? "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] text-white shadow-xs shadow-[#553cfb]/25"
+                            : "bg-[#f8f9fe] text-gray-600 hover:bg-purple-50 hover:text-[#553cfb] border border-purple-100"
+                        )}
+                      >
+                        <span>{season.name || `Season ${season.seasonNumber}`}</span>
+                        <span className={clsx(
+                          "text-[10px] px-1.5 py-0.2 rounded-full",
+                          isSeasonActive ? "bg-white/20 text-white" : "bg-gray-200 text-gray-600"
+                        )}>
+                          {season.episodeCount || season.episodes?.length || 0}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Episode List */}
+              <div className="flex-1 overflow-y-auto hide-scrollbar py-3 space-y-3">
+                {(() => {
+                  const currentSeason = selectedSeriesForEpisodes.seasons?.find(
+                    (s) => s.seasonNumber === activeSeasonNumber
+                  ) || selectedSeriesForEpisodes.seasons?.[0];
+
+                  if (!currentSeason || !currentSeason.episodes || currentSeason.episodes.length === 0) {
+                    return (
+                      <div className="py-12 text-center text-gray-400 text-xs font-medium">
+                        No episodes available for this season.
+                      </div>
+                    );
+                  }
+
+                  return currentSeason.episodes.map((ep) => (
+                    <div
+                      key={ep.episodeNumber}
+                      onClick={() => {
+                        const tvMovie: Movie = {
+                          id: `${selectedSeriesForEpisodes.id}_s${activeSeasonNumber}_e${ep.episodeNumber}`,
+                          tmdbId: selectedSeriesForEpisodes.tmdbId,
+                          title: `${selectedSeriesForEpisodes.title} - S0${activeSeasonNumber}E${ep.episodeNumber < 10 ? '0' : ''}${ep.episodeNumber}: ${ep.title}`,
+                          image: ep.thumbnail || selectedSeriesForEpisodes.poster,
+                          rating: ep.rating || selectedSeriesForEpisodes.rating || '9.0',
+                          genre: selectedSeriesForEpisodes.genre || 'Hindi Web Series',
+                          category: selectedSeriesForEpisodes.category || 'Hindi Web Series',
+                          duration: ep.duration,
+                          releaseDate: ep.airDate,
+                          overview: ep.overview,
+                          watchUrl: ep.streamUrl,
+                          streamServers: ep.streamServers && ep.streamServers.length > 0 ? ep.streamServers : [
+                            { name: "Vidme Fast (Ad-Free)", url: `https://vidzen.fun/tv/${selectedSeriesForEpisodes.tmdbId}/${activeSeasonNumber}/${ep.episodeNumber}?autoPlay=true` },
+                            { name: "Vidcore Direct", url: `https://vidcore.io/tv/${selectedSeriesForEpisodes.tmdbId}/${activeSeasonNumber}/${ep.episodeNumber}?autoPlay=true` },
+                            { name: "VidLink (Clean HD)", url: `https://vidlink.pro/tv/${selectedSeriesForEpisodes.tmdbId}/${activeSeasonNumber}/${ep.episodeNumber}?autoplay=true` },
+                          ]
+                        };
+                        setSelectedSeriesForEpisodes(null);
+                        setStreamingMovie(tvMovie);
+                      }}
+                      className="group cursor-pointer bg-[#f8f9fe] hover:bg-purple-50/70 border border-purple-100/70 rounded-2xl p-2.5 flex items-start gap-3 transition-all hover:shadow-xs active:scale-[0.99]"
+                    >
+                      {/* Episode Thumbnail */}
+                      <div className="relative w-28 sm:w-32 aspect-video rounded-xl overflow-hidden flex-shrink-0 bg-gray-900 border border-purple-100/80 shadow-2xs">
+                        {ep.thumbnail && (
+                          <Image
+                            src={ep.thumbnail}
+                            alt={ep.title}
+                            fill
+                            sizes="130px"
+                            className="object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        )}
+                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                          <div className="w-7 h-7 rounded-full bg-white/90 group-hover:bg-[#553cfb] text-gray-900 group-hover:text-white flex items-center justify-center shadow-md transition-all group-hover:scale-110">
+                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                          </div>
+                        </div>
+                        {ep.duration && (
+                          <div className="absolute bottom-1 right-1 bg-black/80 text-white text-[9px] font-bold px-1.5 py-0.2 rounded">
+                            {ep.duration}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Episode Info */}
+                      <div className="min-w-0 flex-1 py-0.5">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-[10px] font-extrabold text-[#553cfb] bg-[#553cfb]/10 px-1.5 py-0.2 rounded">
+                            E{ep.episodeNumber}
+                          </span>
+                          {ep.airDate && (
+                            <span className="text-[10px] text-gray-400 font-medium">
+                              {ep.airDate}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-[12.5px] font-bold text-gray-900 leading-snug line-clamp-1 group-hover:text-[#553cfb] transition-colors">
+                          {ep.title}
+                        </h4>
+                        {ep.overview && (
+                          <p className="text-[11px] text-gray-500 line-clamp-2 mt-1 leading-relaxed">
+                            {ep.overview}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* In-App Streaming Cinema Player Modal (Netflix/Hotstar Style - Zero Popups & Redirects Blocked!) */}
+      {/* Default Clean Fullscreen Video Player Modal */}
+      <AnimatePresence>
+        {streamingMovie && (() => {
+          const serverList = getServersForMovie(streamingMovie);
+          const currentStreamUrl = serverList[0]?.url || streamingMovie.watchUrl || "";
+
+          return (
+            <div 
+              ref={playerContainerRef}
+              className="fixed inset-0 z-[100] bg-black flex flex-col justify-between"
+            >
+              {/* Top Floating Controls */}
+              <div className="flex items-center justify-between py-3 px-3.5 text-white flex-shrink-0 bg-gradient-to-b from-black/90 via-black/50 to-transparent z-10">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <button
+                    onClick={() => {
+                      if (isPlayerFullscreen && document.fullscreenElement) {
+                        document.exitFullscreen?.().catch(() => {});
+                      }
+                      setStreamingMovie(null);
+                    }}
+                    className="w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer mr-0.5 backdrop-blur-md"
+                    aria-label="Back"
+                    title="Close Player"
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+
+                  <h3 className="text-xs sm:text-sm font-bold truncate max-w-[220px] sm:max-w-md text-gray-100 drop-shadow-md">
+                    {streamingMovie.title}
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Fullscreen Toggle */}
+                  <button
+                    onClick={toggleFullscreen}
+                    className="w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer backdrop-blur-md"
+                    title={isPlayerFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+                    aria-label="Toggle Fullscreen"
+                  >
+                    {isPlayerFullscreen ? (
+                      <Minimize2 className="w-4.5 h-4.5" />
+                    ) : (
+                      <Maximize2 className="w-4.5 h-4.5" />
+                    )}
+                  </button>
+
+                  {/* Close Button */}
+                  <button
+                    onClick={() => {
+                      if (isPlayerFullscreen && document.fullscreenElement) {
+                        document.exitFullscreen?.().catch(() => {});
+                      }
+                      setStreamingMovie(null);
+                    }}
+                    className="w-9 h-9 rounded-full bg-white/15 hover:bg-red-600 text-white flex items-center justify-center transition-colors cursor-pointer backdrop-blur-md"
+                    aria-label="Close player"
+                    title="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Fullscreen Video Player Frame */}
+              <div className="flex-1 w-full h-full bg-black relative flex items-center justify-center overflow-hidden">
+                {currentStreamUrl ? (
+                  <iframe
+                    key={streamingMovie.id}
+                    src={currentStreamUrl}
+                    className="w-full h-full border-0"
+                    allowFullScreen
+                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-gray-400 text-sm">
+                    <Film className="w-10 h-10 mb-2 opacity-50" />
+                    <span>No stream available for this title.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+
       {/* Share Toast Notification */}
       <AnimatePresence>
         {shareToast && (
@@ -1324,108 +2379,261 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                   </button>
                 </div>
 
-                {/* 2. Scrollable Body: Total Downloaded Movies & List */}
+                {/* 2. Scrollable Body: Tabs for Continue Watching & My Downloads */}
                 <div className="flex-1 overflow-y-auto px-4 py-4 hide-scrollbar space-y-4">
-                  {/* My Downloads Summary Card */}
-                  <div className="bg-gradient-to-br from-[#f8f9fe] via-white to-[#f3f1ff] border border-purple-100 rounded-[20px] p-4 shadow-[0_4px_16px_rgba(85,60,251,0.05)]">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="w-10 h-10 rounded-2xl bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb]">
-                          <Download className="w-5 h-5" />
-                        </span>
-                        <div>
-                          <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block">
-                            My Downloads
-                          </span>
-                          <span className="text-xs text-gray-400 font-medium">
-                            Saved locally on this device
-                          </span>
+                  {/* Segmented Switch: Continue Watching vs My Downloads */}
+                  <div className="flex items-center gap-1.5 bg-[#f5f6f8] p-1 rounded-[16px]">
+                    <button
+                      onClick={() => setDrawerTab("history")}
+                      className={clsx(
+                        "flex-1 py-2 px-2.5 rounded-[12px] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                        drawerTab === "history"
+                          ? "bg-white text-[#553cfb] shadow-xs"
+                          : "text-gray-500 hover:text-gray-900"
+                      )}
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Watching ({watchHistoryList.length})</span>
+                    </button>
+                    <button
+                      onClick={() => setDrawerTab("downloads")}
+                      className={clsx(
+                        "flex-1 py-2 px-2.5 rounded-[12px] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                        drawerTab === "downloads"
+                          ? "bg-white text-[#553cfb] shadow-xs"
+                          : "text-gray-500 hover:text-gray-900"
+                      )}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Downloads ({downloadedList.length})</span>
+                    </button>
+                  </div>
+
+                  {drawerTab === "history" ? (
+                    /* WATCH HISTORY & CONTINUE WATCHING TAB */
+                    <div className="space-y-3">
+                      {/* Summary Card */}
+                      <div className="bg-gradient-to-br from-[#f8f9fe] via-white to-[#f3f1ff] border border-purple-100 rounded-[20px] p-4 shadow-[0_4px_16px_rgba(85,60,251,0.05)]">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="w-10 h-10 rounded-2xl bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb]">
+                              <Clock className="w-5 h-5" />
+                            </span>
+                            <div>
+                              <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block">
+                                Watch History
+                              </span>
+                              <span className="text-xs text-gray-400 font-medium">
+                                Resume where you left off
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-3xl font-black text-gray-900 tracking-tight">
+                            {watchHistoryList.length}
+                          </div>
                         </div>
                       </div>
-                      <div className="text-3xl font-black text-gray-900 tracking-tight">
-                        {downloadedList.length}
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* List of Downloaded Movies */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between px-1">
-                      <span className="text-[12px] font-bold text-gray-700">
-                        Saved Movies ({downloadedList.length})
-                      </span>
-                      {downloadedList.length > 0 && (
-                        <button
-                          onClick={() => {
-                            if (confirm("Clear all downloaded movie history?")) {
-                              clearDownloadedMovies();
-                            }
-                          }}
-                          className="text-[11px] font-semibold text-red-500 hover:text-red-700 flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          Clear
-                        </button>
+                      {/* Header & Clear Button */}
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[12px] font-bold text-gray-700">
+                          Recent Streams ({watchHistoryList.length})
+                        </span>
+                        {watchHistoryList.length > 0 && (
+                          <button
+                            onClick={() => {
+                              if (confirm("Clear all watch history?")) {
+                                clearWatchHistory();
+                              }
+                            }}
+                            className="text-[11px] font-semibold text-red-500 hover:text-red-700 flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Clear All
+                          </button>
+                        )}
+                      </div>
+
+                      {/* List of Watched Movies */}
+                      {watchHistoryList.length === 0 ? (
+                        <div className="bg-[#f8f9fe] border border-dashed border-purple-200/70 rounded-[18px] p-4 text-center">
+                          <Clock className="w-7 h-7 text-[#553cfb]/40 mx-auto mb-1.5" />
+                          <p className="text-[12px] font-bold text-gray-700">No watch history yet</p>
+                          <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
+                            Start streaming any movie and it will track your progress here!
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5 max-h-[320px] overflow-y-auto hide-scrollbar pr-0.5">
+                          {watchHistoryList.map((item) => (
+                            <div
+                              key={item.id}
+                              className="bg-[#f8f9fe] hover:bg-purple-50/50 border border-purple-100/70 rounded-[18px] p-2.5 flex flex-col gap-2 transition-all"
+                            >
+                              <div className="flex items-center gap-2.5">
+                                {item.image ? (
+                                  <div className="relative w-11 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-gray-200 shadow-2xs">
+                                    <Image src={item.image} alt={item.title} fill className="object-cover" />
+                                  </div>
+                                ) : (
+                                  <div className="w-11 h-16 rounded-xl bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb] flex-shrink-0">
+                                    <Film className="w-5 h-5" />
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] font-extrabold bg-[#553cfb] text-white px-1.5 py-0.2 rounded">
+                                      {item.category || "Cinema"}
+                                    </span>
+                                    <span className="text-[9px] text-emerald-600 font-extrabold bg-emerald-50 border border-emerald-200/60 px-1.5 py-0.2 rounded">
+                                      {item.progressPercent}% watched
+                                    </span>
+                                  </div>
+                                  <h4 className="text-[12px] font-bold text-gray-800 truncate mt-0.5">
+                                    {item.title}
+                                  </h4>
+                                  <p className="text-[10px] text-gray-400 truncate">
+                                    {item.duration ? `${item.duration} • ` : ""}{item.lastServerName || "Vidcore HD"}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeWatchHistoryItem(item.id);
+                                  }}
+                                  className="p-1.5 text-gray-300 hover:text-red-500 transition-colors cursor-pointer"
+                                  title="Delete from history"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              {/* Progress bar and Resume button row */}
+                              <div className="flex items-center gap-2 pt-1 border-t border-purple-50">
+                                <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-gradient-to-r from-[#553cfb] to-emerald-400 rounded-full"
+                                    style={{ width: `${Math.min(100, Math.max(8, item.progressPercent))}%` }}
+                                  />
+                                </div>
+                                <button
+                                  onClick={() => handleStartStreaming(item)}
+                                  className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-[#553cfb] to-[#7b46fa] text-white font-bold text-[10px] flex items-center gap-1 shadow-2xs hover:brightness-105 active:scale-95 cursor-pointer flex-shrink-0"
+                                >
+                                  <Play className="w-2.5 h-2.5 fill-white" />
+                                  <span>Resume</span>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
-
-                    {downloadedList.length === 0 ? (
-                      <div className="bg-[#f8f9fe] border border-dashed border-purple-200/70 rounded-[18px] p-4 text-center">
-                        <Film className="w-7 h-7 text-[#553cfb]/40 mx-auto mb-1.5" />
-                        <p className="text-[12px] font-bold text-gray-700">No downloads yet</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
-                          Download any movie and it will appear here offline!
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-[220px] overflow-y-auto hide-scrollbar pr-0.5">
-                        {downloadedList.map((item) => (
-                          <div
-                            key={item.id}
-                            className="bg-[#f8f9fe] hover:bg-purple-50/50 border border-purple-100/70 rounded-[16px] p-2 flex items-center gap-2.5 transition-all"
-                          >
-                            {item.image ? (
-                              <div className="relative w-10 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-gray-200">
-                                <Image src={item.image} alt={item.title} fill className="object-cover" />
-                              </div>
-                            ) : (
-                              <div className="w-10 h-14 rounded-lg bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb] flex-shrink-0">
-                                <Film className="w-5 h-5" />
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1">
-                                <span className="text-[9px] font-extrabold bg-[#553cfb] text-white px-1.5 py-0.2 rounded">
-                                  {item.quality || "HD"}
-                                </span>
-                                {item.fileSize && (
-                                  <span className="text-[9px] text-gray-400 font-medium truncate">
-                                    {item.fileSize}
-                                  </span>
-                                )}
-                              </div>
-                              <h4 className="text-[12px] font-bold text-gray-800 truncate mt-0.5">
-                                {item.title}
-                              </h4>
-                              <p className="text-[10px] text-gray-400 truncate">
-                                {new Date(item.downloadedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                              </p>
+                  ) : (
+                    /* MY DOWNLOADS TAB */
+                    <div className="space-y-3">
+                      {/* My Downloads Summary Card */}
+                      <div className="bg-gradient-to-br from-[#f8f9fe] via-white to-[#f3f1ff] border border-purple-100 rounded-[20px] p-4 shadow-[0_4px_16px_rgba(85,60,251,0.05)]">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="w-10 h-10 rounded-2xl bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb]">
+                              <Download className="w-5 h-5" />
+                            </span>
+                            <div>
+                              <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block">
+                                My Downloads
+                              </span>
+                              <span className="text-xs text-gray-400 font-medium">
+                                Saved locally on this device
+                              </span>
                             </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeDownloadedMovie(item.id);
-                              }}
-                              className="p-1.5 text-gray-300 hover:text-red-500 transition-colors cursor-pointer"
-                              title="Delete from list"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
                           </div>
-                        ))}
+                          <div className="text-3xl font-black text-gray-900 tracking-tight">
+                            {downloadedList.length}
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </div>
+
+                      {/* List of Downloaded Movies */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[12px] font-bold text-gray-700">
+                            Saved Movies ({downloadedList.length})
+                          </span>
+                          {downloadedList.length > 0 && (
+                            <button
+                              onClick={() => {
+                                if (confirm("Clear all downloaded movie history?")) {
+                                  clearDownloadedMovies();
+                                }
+                              }}
+                              className="text-[11px] font-semibold text-red-500 hover:text-red-700 flex items-center gap-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Clear
+                            </button>
+                          )}
+                        </div>
+
+                        {downloadedList.length === 0 ? (
+                          <div className="bg-[#f8f9fe] border border-dashed border-purple-200/70 rounded-[18px] p-4 text-center">
+                            <Film className="w-7 h-7 text-[#553cfb]/40 mx-auto mb-1.5" />
+                            <p className="text-[12px] font-bold text-gray-700">No downloads yet</p>
+                            <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
+                              Download any movie and it will appear here offline!
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-[300px] overflow-y-auto hide-scrollbar pr-0.5">
+                            {downloadedList.map((item) => (
+                              <div
+                                key={item.id}
+                                className="bg-[#f8f9fe] hover:bg-purple-50/50 border border-purple-100/70 rounded-[16px] p-2 flex items-center gap-2.5 transition-all"
+                              >
+                                {item.image ? (
+                                  <div className="relative w-10 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-gray-200">
+                                    <Image src={item.image} alt={item.title} fill className="object-cover" />
+                                  </div>
+                                ) : (
+                                  <div className="w-10 h-14 rounded-lg bg-[#553cfb]/10 flex items-center justify-center text-[#553cfb] flex-shrink-0">
+                                    <Film className="w-5 h-5" />
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] font-extrabold bg-[#553cfb] text-white px-1.5 py-0.2 rounded">
+                                      {item.quality || "HD"}
+                                    </span>
+                                    {item.fileSize && (
+                                      <span className="text-[9px] text-gray-400 font-medium truncate">
+                                        {item.fileSize}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <h4 className="text-[12px] font-bold text-gray-800 truncate mt-0.5">
+                                    {item.title}
+                                  </h4>
+                                  <p className="text-[10px] text-gray-400 truncate">
+                                    {new Date(item.downloadedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeDownloadedMovie(item.id);
+                                  }}
+                                  className="p-1.5 text-gray-300 hover:text-red-500 transition-colors cursor-pointer"
+                                  title="Delete from list"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Quick Category Filters */}
                   <div className="pt-2 border-t border-purple-50">

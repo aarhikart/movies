@@ -59,43 +59,6 @@ export async function GET(request: Request) {
       if (type === 'popular') results = results.slice(5, 20);
       if (type === 'trending') results = results.slice(20, 35);
     }
-  } else {
-    // If NOT fetching a specific type (i.e. fetching the main All Movies grid)
-    // and we are on the "All" tab (no filter), sort Bollywood -> Hindi Web Series -> Other!
-    if (!filter || filter === 'All') {
-      const getRank = (m: any) => {
-        const mapped = getFilterForCategory(m.category);
-        if (mapped === 'Bollywood') {
-          return 1;
-        }
-        if (mapped === 'Hindi web Series') {
-          return 2;
-        }
-        return 3;
-      };
-
-      const bollywood = results.filter((m: any) => getRank(m) === 1);
-      const hindiWebSeries = results.filter((m: any) => getRank(m) === 2);
-      const others = results.filter((m: any) => getRank(m) === 3);
-
-      const mixedResults = [];
-      let bIdx = 0;
-      let hIdx = 0;
-
-      // Interleave 50/50
-      while (bIdx < bollywood.length || hIdx < hindiWebSeries.length) {
-        if (bIdx < bollywood.length) {
-          mixedResults.push(bollywood[bIdx]);
-          bIdx++;
-        }
-        if (hIdx < hindiWebSeries.length) {
-          mixedResults.push(hindiWebSeries[hIdx]);
-          hIdx++;
-        }
-      }
-
-      results = [...mixedResults, ...others];
-    }
   }
 
   // Pagination
