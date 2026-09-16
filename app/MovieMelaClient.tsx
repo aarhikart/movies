@@ -25,7 +25,8 @@ import {
   Minimize2,
   RotateCcw,
   Clock,
-  Tv
+  Tv,
+  Calendar
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -47,6 +48,7 @@ import {
   WatchedMovie
 } from "@/lib/watchHistory";
 import { WebSeriesShow, TvSeason, TvEpisode } from "@/lib/movieHelper";
+import { formatReleaseMonth } from "@/lib/dateHelper";
 
 type Movie = {
   id: string;
@@ -119,6 +121,8 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
   // Dubbed Data states
   const [allMovies, setAllMovies] = useState<Movie[]>([]);
   const [totalMovies, setTotalMovies] = useState(0);
+  const [activeYear, setActiveYear] = useState("All");
+  const [dubbedYears, setDubbedYears] = useState<string[]>(["All", "2026", "2025", "2024", "2023", "2022", "2021", "2020"]);
   
   // Original Movies Data states
   const [originalMovies, setOriginalMovies] = useState<Movie[]>([]);
@@ -127,6 +131,8 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
   const [isLoadingMoreOriginal, setIsLoadingMoreOriginal] = useState(false);
   const [originalChips, setOriginalChips] = useState<string[]>(["All"]);
   const [activeOriginalChip, setActiveOriginalChip] = useState("All");
+  const [activeOriginalYear, setActiveOriginalYear] = useState("All");
+  const [originalYears, setOriginalYears] = useState<string[]>(["All", "2024"]);
 
   // Web Series Data states
   const [webSeriesList, setWebSeriesList] = useState<WebSeriesShow[]>([]);
@@ -135,6 +141,8 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
   const [isLoadingMoreWebSeries, setIsLoadingMoreWebSeries] = useState(false);
   const [webSeriesChips, setWebSeriesChips] = useState<string[]>(["All"]);
   const [activeWebSeriesChip, setActiveWebSeriesChip] = useState("All");
+  const [activeWebSeriesYear, setActiveWebSeriesYear] = useState("All");
+  const [webSeriesYears, setWebSeriesYears] = useState<string[]>(["All", "2026", "2024"]);
 
   // Selected Series for Episode Modal
   const [selectedSeriesForEpisodes, setSelectedSeriesForEpisodes] = useState<WebSeriesShow | null>(null);
@@ -585,30 +593,34 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       .catch(console.error);
   }, []);
 
-  // Fetch filtered "All Movies" when activeChip changes or when mainTab switches to "dubbed"
+  // Fetch filtered "All Movies" when activeChip, activeYear changes or when mainTab switches to "dubbed"
   useEffect(() => {
     if (mainTab !== "dubbed") return;
     const filterParam = activeChip === 'All' ? '' : `&filter=${encodeURIComponent(activeChip)}`;
+    const yearParam = activeYear === 'All' ? '' : `&year=${encodeURIComponent(activeYear)}`;
     
     // Fetch Movies grid
     setPage(1);
     setIsLoadingMore(true);
-    fetch(`/api/movies?page=1&limit=20${filterParam}`)
+    fetch(`/api/movies?page=1&limit=20${filterParam}${yearParam}`)
       .then(res => res.json())
       .then(res => {
         setAllMovies(res.data || []);
         setTotalMovies(res.total || 0);
+        if (res.years && res.years.length > 0) {
+          setDubbedYears(res.years);
+        }
         setIsLoadingMore(false);
       })
       .catch(e => {
         console.error(e);
         setIsLoadingMore(false);
       });
-  }, [activeChip, mainTab]);
+  }, [activeChip, activeYear, mainTab]);
 
   // Stable state ref for Dubbed Infinite Scroll (prevents tear-down/re-attach glitch)
-  const dubbedStateRef = useRef({ page, total: totalMovies, count: allMovies.length, activeChip, loading: isLoadingMore });
-  dubbedStateRef.current = { page, total: totalMovies, count: allMovies.length, activeChip, loading: isLoadingMore };
+  const dubbedStateRef = useRef({ page, total: totalMovies, count: allMovies.length, activeChip, activeYear, loading: isLoadingMore });
+  dubbedStateRef.current = { page, total: totalMovies, count: allMovies.length, activeChip, activeYear, loading: isLoadingMore };
 
   // Infinite Scroll logic for Dubbed Movies
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -620,8 +632,9 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     setIsLoadingMore(true);
     const nextPage = state.page + 1;
     const filterParam = state.activeChip === 'All' ? '' : `&filter=${encodeURIComponent(state.activeChip)}`;
+    const yearParam = state.activeYear === 'All' ? '' : `&year=${encodeURIComponent(state.activeYear)}`;
     try {
-      const res = await fetch(`/api/movies?page=${nextPage}&limit=20${filterParam}`);
+      const res = await fetch(`/api/movies?page=${nextPage}&limit=20${filterParam}${yearParam}`);
       const data = await res.json();
       if (data.data && data.data.length > 0) {
         setAllMovies(prev => {
@@ -665,18 +678,22 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
         if (data.categories && data.categories.length > 0) {
           setOriginalChips(["All", ...data.categories]);
         }
+        if (data.years && data.years.length > 0) {
+          setOriginalYears(data.years);
+        }
       })
       .catch(console.error);
   }, []);
 
-  // Fetch filtered "Original Movies" when activeOriginalChip changes or when mainTab switches to "original"
+  // Fetch filtered "Original Movies" when activeOriginalChip or activeOriginalYear changes or when mainTab switches to "original"
   useEffect(() => {
     if (mainTab !== "original") return;
     const filterParam = activeOriginalChip === 'All' ? '' : `&filter=${encodeURIComponent(activeOriginalChip)}`;
+    const yearParam = activeOriginalYear === 'All' ? '' : `&year=${encodeURIComponent(activeOriginalYear)}`;
     
     setOriginalPage(1);
     setIsLoadingMoreOriginal(true);
-    fetch(`/api/original-movies?page=1&limit=20${filterParam}`)
+    fetch(`/api/original-movies?page=1&limit=20${filterParam}${yearParam}`)
       .then(res => res.json())
       .then(res => {
         setOriginalMovies(res.data || []);
@@ -684,17 +701,20 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
         if (res.categories && res.categories.length > 0) {
           setOriginalChips(["All", ...res.categories]);
         }
+        if (res.years && res.years.length > 0) {
+          setOriginalYears(res.years);
+        }
         setIsLoadingMoreOriginal(false);
       })
       .catch(e => {
         console.error(e);
         setIsLoadingMoreOriginal(false);
       });
-  }, [activeOriginalChip, mainTab]);
+  }, [activeOriginalChip, activeOriginalYear, mainTab]);
 
   // Stable state ref for Original Infinite Scroll (prevents tear-down/re-attach glitch)
-  const originalStateRef = useRef({ page: originalPage, total: totalOriginalMovies, count: originalMovies.length, chip: activeOriginalChip, loading: isLoadingMoreOriginal });
-  originalStateRef.current = { page: originalPage, total: totalOriginalMovies, count: originalMovies.length, chip: activeOriginalChip, loading: isLoadingMoreOriginal };
+  const originalStateRef = useRef({ page: originalPage, total: totalOriginalMovies, count: originalMovies.length, chip: activeOriginalChip, year: activeOriginalYear, loading: isLoadingMoreOriginal });
+  originalStateRef.current = { page: originalPage, total: totalOriginalMovies, count: originalMovies.length, chip: activeOriginalChip, year: activeOriginalYear, loading: isLoadingMoreOriginal };
 
   // Infinite Scroll logic for Original Movies
   const originalSentinelRef = useRef<HTMLDivElement>(null);
@@ -706,8 +726,9 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     setIsLoadingMoreOriginal(true);
     const nextPage = state.page + 1;
     const filterParam = state.chip === 'All' ? '' : `&filter=${encodeURIComponent(state.chip)}`;
+    const yearParam = state.year === 'All' ? '' : `&year=${encodeURIComponent(state.year)}`;
     try {
-      const res = await fetch(`/api/original-movies?page=${nextPage}&limit=20${filterParam}`);
+      const res = await fetch(`/api/original-movies?page=${nextPage}&limit=20${filterParam}${yearParam}`);
       const data = await res.json();
       if (data.data && data.data.length > 0) {
         setOriginalMovies(prev => {
@@ -751,18 +772,22 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
         if (data.categories && data.categories.length > 0) {
           setWebSeriesChips(["All", ...data.categories]);
         }
+        if (data.years && data.years.length > 0) {
+          setWebSeriesYears(data.years);
+        }
       })
       .catch(console.error);
   }, []);
 
-  // Fetch filtered Web Series when activeWebSeriesChip changes or when mainTab switches to "webseries"
+  // Fetch filtered Web Series when activeWebSeriesChip or activeWebSeriesYear changes or when mainTab switches to "webseries"
   useEffect(() => {
     if (mainTab !== "webseries") return;
     const categoryParam = activeWebSeriesChip === 'All' ? '' : `&category=${encodeURIComponent(activeWebSeriesChip)}`;
+    const yearParam = activeWebSeriesYear === 'All' ? '' : `&year=${encodeURIComponent(activeWebSeriesYear)}`;
     
     setWebSeriesPage(1);
     setIsLoadingMoreWebSeries(true);
-    fetch(`/api/web-series?page=1&limit=20${categoryParam}`)
+    fetch(`/api/web-series?page=1&limit=20${categoryParam}${yearParam}`)
       .then(res => res.json())
       .then(res => {
         setWebSeriesList(res.data || []);
@@ -770,17 +795,20 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
         if (res.categories && res.categories.length > 0) {
           setWebSeriesChips(["All", ...res.categories]);
         }
+        if (res.years && res.years.length > 0) {
+          setWebSeriesYears(res.years);
+        }
         setIsLoadingMoreWebSeries(false);
       })
       .catch(e => {
         console.error(e);
         setIsLoadingMoreWebSeries(false);
       });
-  }, [activeWebSeriesChip, mainTab]);
+  }, [activeWebSeriesChip, activeWebSeriesYear, mainTab]);
 
   // Stable state ref for Web Series Infinite Scroll (prevents tear-down/re-attach glitch)
-  const webSeriesStateRef = useRef({ page: webSeriesPage, total: totalWebSeries, count: webSeriesList.length, chip: activeWebSeriesChip, loading: isLoadingMoreWebSeries });
-  webSeriesStateRef.current = { page: webSeriesPage, total: totalWebSeries, count: webSeriesList.length, chip: activeWebSeriesChip, loading: isLoadingMoreWebSeries };
+  const webSeriesStateRef = useRef({ page: webSeriesPage, total: totalWebSeries, count: webSeriesList.length, chip: activeWebSeriesChip, year: activeWebSeriesYear, loading: isLoadingMoreWebSeries });
+  webSeriesStateRef.current = { page: webSeriesPage, total: totalWebSeries, count: webSeriesList.length, chip: activeWebSeriesChip, year: activeWebSeriesYear, loading: isLoadingMoreWebSeries };
 
   // Infinite Scroll logic for Web Series
   const webSeriesSentinelRef = useRef<HTMLDivElement>(null);
@@ -792,8 +820,9 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     setIsLoadingMoreWebSeries(true);
     const nextPage = state.page + 1;
     const categoryParam = state.chip === 'All' ? '' : `&category=${encodeURIComponent(state.chip)}`;
+    const yearParam = state.year === 'All' ? '' : `&year=${encodeURIComponent(state.year)}`;
     try {
-      const res = await fetch(`/api/web-series?page=${nextPage}&limit=20${categoryParam}`);
+      const res = await fetch(`/api/web-series?page=${nextPage}&limit=20${categoryParam}${yearParam}`);
       const data = await res.json();
       if (data.data && data.data.length > 0) {
         setWebSeriesList(prev => {
@@ -1214,24 +1243,66 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
               </button>
             </div>
 
-            {/* Active Category Filter Indicator */}
-            {((mainTab === "dubbed" && activeChip !== "All") || (mainTab === "original" && activeOriginalChip !== "All") || (mainTab === "webseries" && activeWebSeriesChip !== "All")) && (
+            {/* Year / Release Date Filter Chips Bar */}
+            <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto hide-scrollbar pb-0.5 px-0.5">
+              <span className="text-[11px] font-extrabold text-gray-500 flex items-center gap-1 pl-1 pr-1 flex-shrink-0">
+                <Calendar className="w-3.5 h-3.5 text-[#553cfb]" /> Year:
+              </span>
+              {(mainTab === "dubbed" ? dubbedYears : mainTab === "original" ? originalYears : webSeriesYears).map((yr) => {
+                const isSelected = mainTab === "dubbed" 
+                  ? activeYear === yr 
+                  : mainTab === "original" 
+                  ? activeOriginalYear === yr 
+                  : activeWebSeriesYear === yr;
+                return (
+                  <button
+                    key={yr}
+                    onClick={() => {
+                      if (mainTab === "dubbed") setActiveYear(yr);
+                      else if (mainTab === "original") setActiveOriginalYear(yr);
+                      else setActiveWebSeriesYear(yr);
+                      if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+                    }}
+                    className={clsx(
+                      "px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 active:scale-95",
+                      isSelected
+                        ? "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] text-white shadow-[0_2px_8px_rgba(85,60,251,0.25)]"
+                        : "bg-[#f4f5fa] hover:bg-purple-100/60 text-gray-600 border border-purple-100/60"
+                    )}
+                  >
+                    {yr === "All" ? "All Years" : yr === "2026" ? "2026 (Latest)" : yr}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Active Category & Year Filter Indicator */}
+            {((mainTab === "dubbed" && (activeChip !== "All" || activeYear !== "All")) || 
+              (mainTab === "original" && (activeOriginalChip !== "All" || activeOriginalYear !== "All")) || 
+              (mainTab === "webseries" && (activeWebSeriesChip !== "All" || activeWebSeriesYear !== "All"))) && (
               <div className="flex items-center justify-between mt-2 pt-0.5 px-0.5">
-                <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-500">
-                  <span>Showing:</span>
-                  <span className="bg-[#553cfb]/10 text-[#553cfb] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                    {mainTab === "dubbed" ? activeChip : mainTab === "original" ? activeOriginalChip : activeWebSeriesChip}
-                  </span>
+                <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] font-semibold text-gray-500">
+                  <span>Filtered:</span>
+                  {(mainTab === "dubbed" ? activeChip !== "All" : mainTab === "original" ? activeOriginalChip !== "All" : activeWebSeriesChip !== "All") && (
+                    <span className="bg-[#553cfb]/10 text-[#553cfb] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      {mainTab === "dubbed" ? activeChip : mainTab === "original" ? activeOriginalChip : activeWebSeriesChip}
+                    </span>
+                  )}
+                  {(mainTab === "dubbed" ? activeYear !== "All" : mainTab === "original" ? activeOriginalYear !== "All" : activeWebSeriesYear !== "All") && (
+                    <span className="bg-purple-500/10 text-[#553cfb] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      Year: {mainTab === "dubbed" ? activeYear : mainTab === "original" ? activeOriginalYear : activeWebSeriesYear}
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={() => {
-                    if (mainTab === "dubbed") setActiveChip("All");
-                    else if (mainTab === "original") setActiveOriginalChip("All");
-                    else setActiveWebSeriesChip("All");
+                    if (mainTab === "dubbed") { setActiveChip("All"); setActiveYear("All"); }
+                    else if (mainTab === "original") { setActiveOriginalChip("All"); setActiveOriginalYear("All"); }
+                    else { setActiveWebSeriesChip("All"); setActiveWebSeriesYear("All"); }
                   }}
                   className="text-[11px] font-bold text-gray-400 hover:text-red-500 transition-colors cursor-pointer flex items-center gap-0.5"
                 >
-                  <X className="w-3 h-3" /> Clear Filter
+                  <X className="w-3 h-3" /> Reset
                 </button>
               </div>
             )}
@@ -1273,6 +1344,11 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                           />
                         )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        {/* Release Date Badge on top-left */}
+                        <div className="absolute top-2.5 left-2.5 bg-black/75 backdrop-blur-xs text-white text-[9.5px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 border border-white/20 shadow-xs z-10">
+                          <Calendar className="w-2.5 h-2.5 text-purple-300" />
+                          <span>{formatReleaseMonth(movie.releaseDate, movie.title)}</span>
+                        </div>
                         {movie.rating && (
                           <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
                             <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
@@ -1459,6 +1535,11 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                           </div>
                         )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        {/* Release Date Badge on top-left */}
+                        <div className="absolute top-2.5 left-2.5 bg-black/75 backdrop-blur-xs text-white text-[9.5px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 border border-white/20 shadow-xs z-10">
+                          <Calendar className="w-2.5 h-2.5 text-purple-300" />
+                          <span>{formatReleaseMonth(movie.releaseDate, movie.title)}</span>
+                        </div>
                         {movie.rating && (
                           <div className="absolute top-2.5 right-2.5 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold border border-white/15">
                             <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> {movie.rating}
@@ -1658,9 +1739,13 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                           <Tv className="w-2.5 h-2.5" /> Series
                         </div>
                         
-                        <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
-                          <div className="bg-black/70 backdrop-blur-xs text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md border border-white/10">
+                        <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1">
+                          <div className="bg-black/75 backdrop-blur-xs text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md border border-white/10 truncate">
                             {series.totalSeasons} {series.totalSeasons === 1 ? 'Season' : 'Seasons'} • {series.totalEpisodes} Eps
+                          </div>
+                          <div className="bg-black/75 backdrop-blur-xs text-purple-200 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md border border-white/10 flex items-center gap-1 flex-shrink-0">
+                            <Calendar className="w-2.5 h-2.5 text-purple-300" />
+                            <span>{formatReleaseMonth(series.releaseDate || series.seasons?.[0]?.episodes?.[0]?.airDate, series.title)}</span>
                           </div>
                         </div>
                       </div>

@@ -2,7 +2,31 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getFilterForCategory } from '../../categoryHelper';
-import { getMovieById } from '@/lib/movieHelper';
+import { getMovieById, parseDateToTimestamp, getYearFromDate } from '@/lib/movieHelper';
+
+let cachedSortedMovies: any[] | null = null;
+let lastMoviesFileMtime = 0;
+
+function getSortedMovies(): any[] {
+  const filePath = path.join(process.cwd(), 'app', 'movies.json');
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const stats = fs.statSync(filePath);
+    if (cachedSortedMovies && stats.mtimeMs === lastMoviesFileMtime) {
+      return cachedSortedMovies;
+    }
+    const fileContents = fs.readFileSync(filePath, 'utf8');
+    const list: any[] = JSON.parse(fileContents);
+    // Sort chronologically descending: newest release date first
+    list.sort((a, b) => parseDateToTimestamp(b.releaseDate, b.title) - parseDateToTimestamp(a.releaseDate, a.title));
+    cachedSortedMovies = list;
+    lastMoviesFileMtime = stats.mtimeMs;
+    return cachedSortedMovies;
+  } catch (e) {
+    console.error("Failed to load movies.json", e);
+    return cachedSortedMovies || [];
+  }
+}
 
 export async function GET(request: Request) {
   // Create a new URL object to get params
@@ -16,20 +40,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: 'Movie not found', data: [] }, { status: 404 });
   }
 
-  let movies = [];
-  try {
-    const filePath = path.join(process.cwd(), 'app', 'movies.json');
-    const fileContents = fs.readFileSync(filePath, 'utf8');
-    movies = JSON.parse(fileContents);
-  } catch (e) {
-    console.error("Failed to load movies.json", e);
-  }
+  const movies = getSortedMovies();
 
   const q = url.searchParams.get('q');
   const page = parseInt(url.searchParams.get('page') || '1');
   const limit = parseInt(url.searchParams.get('limit') || '20');
   const type = url.searchParams.get('type');
   const filter = url.searchParams.get('filter');
+  const year = url.searchParams.get('year');
 
   let results = [...movies];
 
@@ -49,6 +67,11 @@ export async function GET(request: Request) {
     });
   }
 
+  // Year filtering
+  if (year && year !== 'All') {
+    results = results.filter((m: any) => getYearFromDate(m.releaseDate, m.title) === year);
+  }
+
   // Type filtering (popular, trending, hero)
   if (type) {
     const typeResults = results.filter((m: any) => m.type === type);
@@ -61,6 +84,9 @@ export async function GET(request: Request) {
     }
   }
 
+  // Available release years
+  const availableYears = ["All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018"];
+
   // Pagination
   const startIndex = (page - 1) * limit;
   const paginatedResults = results.slice(startIndex, startIndex + limit);
@@ -69,6 +95,7 @@ export async function GET(request: Request) {
     data: paginatedResults,
     total: results.length,
     page,
-    totalPages: Math.ceil(results.length / limit)
+    totalPages: Math.ceil(results.length / limit),
+    years: availableYears
   });
 }

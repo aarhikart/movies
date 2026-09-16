@@ -117,6 +117,7 @@ export interface WebSeriesShow {
   rating?: string;
   totalSeasons: number;
   totalEpisodes: number;
+  releaseDate?: string;
   seasons: TvSeason[];
 }
 
@@ -132,4 +133,7 @@ export function getAllWebSeries(): WebSeriesShow[] {
   }
   return [];
 }
+
+export { parseDateToTimestamp, formatReleaseMonth, getYearFromDate } from './dateHelper';
+
 
