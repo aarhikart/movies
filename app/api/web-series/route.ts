@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.max(1, parseInt(searchParams.get('limit') || '24', 10));
-    const search = (searchParams.get('search') || '').trim().toLowerCase();
+    const search = (searchParams.get('search') || searchParams.get('q') || '').trim().toLowerCase();
     const category = (searchParams.get('category') || '').trim();
     const id = (searchParams.get('id') || '').trim();
     const tmdbId = (searchParams.get('tmdbId') || '').trim();

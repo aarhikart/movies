@@ -164,6 +164,21 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [downloadedList, setDownloadedList] = useState<DownloadedMovie[]>([]);
 
+  // Main scroll container ref for resetting scroll on tab switch
+  const mainScrollRef = useRef<HTMLDivElement>(null);
+
+  // Tab switcher that resets search state and scrolls to top smoothly
+  const handleTabSwitch = (newTab: "dubbed" | "original" | "webseries") => {
+    if (newTab === mainTab) return;
+    setMainTab(newTab);
+    setSearchQuery("");
+    setSearchSuggestions([]);
+    setIsSearching(false);
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = 0;
+    }
+  };
+
   // Record visit in MongoDB Atlas (2-hour rolling session deduplication)
   useEffect(() => {
     fetch("/api/views", { method: "POST" }).catch(() => {});
@@ -432,7 +447,10 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       : "";
     const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
     const displayTitle = movie.title || "Movie";
-    const shareCaption = `🎬 *${displayTitle}*\n\nWatch this movie on MovieMela:\n${shareUrl}`;
+    const isSeries = movie.type === 'webseries' || movie.id?.startsWith('series_');
+    const shareCaption = isSeries
+      ? `📺 *${displayTitle}*\n\nWatch this web series on MovieMela:\n${shareUrl}`
+      : `🎬 *${displayTitle}*\n\nWatch this movie on MovieMela:\n${shareUrl}`;
     const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareCaption)}`;
     window.open(whatsappUrl, "_blank");
     setShowShareSheet(false);
@@ -452,6 +470,8 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       ? (process.env.NEXT_PUBLIC_SITE_URL || window.location.origin)
       : "";
     const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
+    const isSeries = movie.type === 'webseries' || movie.id?.startsWith('series_');
+    const itemWord = isSeries ? "Web series" : "Movie";
 
     // 1. Copy URL to clipboard for the Instagram Link Sticker
     try {
@@ -473,7 +493,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
 
       if (typeof navigator !== "undefined" && typeof (navigator as any).canShare === "function") {
         if ((navigator as any).canShare({ files: [posterFile] })) {
-          setShareToast("Movie link copied! Select 'Instagram Stories' to post.");
+          setShareToast(`${itemWord} link copied! Select 'Instagram Stories' to post.`);
           setTimeout(() => setShareToast(null), 4000);
           await navigator.share({
             files: [posterFile],
@@ -492,11 +512,11 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       document.body.removeChild(downloadAnchor);
-      setShareToast("Poster downloaded & movie link copied! Upload to your Instagram Story.");
+      setShareToast(`Poster downloaded & ${itemWord.toLowerCase()} link copied! Upload to your Instagram Story.`);
       setTimeout(() => setShareToast(null), 4500);
     } catch (err: any) {
       if (err?.name !== "AbortError") {
-        setShareToast("Movie link copied to clipboard!");
+        setShareToast(`${itemWord} link copied to clipboard!`);
         setTimeout(() => setShareToast(null), 3000);
       }
     } finally {
@@ -514,20 +534,22 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       : "";
     const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
     const displayTitle = movie.title || "Movie";
-    const shareCaption = `🎬 *${displayTitle}*\n\nWatch this movie on MovieMela:\n${shareUrl}`;
+    const isSeries = movie.type === 'webseries' || movie.id?.startsWith('series_');
+    const itemWord = isSeries ? "web series" : "movie";
+    const shareCaption = `🎬 *${displayTitle}*\n\nWatch this ${itemWord} on MovieMela:\n${shareUrl}`;
 
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
           title: displayTitle,
-          text: `🎬 *${displayTitle}*\n\nWatch this movie on MovieMela:\n`,
+          text: `🎬 *${displayTitle}*\n\nWatch this ${itemWord} on MovieMela:\n`,
           url: shareUrl,
         });
       } catch (e) {}
     } else {
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(shareCaption);
-        setShareToast("Movie link copied to clipboard!");
+        setShareToast(`${isSeries ? "Web series" : "Movie"} link copied to clipboard!`);
         setTimeout(() => setShareToast(null), 3000);
       }
     }
@@ -542,9 +564,10 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       ? (process.env.NEXT_PUBLIC_SITE_URL || window.location.origin)
       : "";
     const shareUrl = `${currentOrigin}/movie/${encodeURIComponent(movie.id)}`;
+    const isSeries = movie.type === 'webseries' || movie.id?.startsWith('series_');
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(shareUrl);
-      setShareToast("Movie link copied to clipboard!");
+      setShareToast(`${isSeries ? "Web series" : "Movie"} link copied to clipboard!`);
       setTimeout(() => setShareToast(null), 3000);
     }
     setShowShareSheet(false);
@@ -562,8 +585,9 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       .catch(console.error);
   }, []);
 
-  // Fetch filtered "All Movies" when activeChip changes
+  // Fetch filtered "All Movies" when activeChip changes or when mainTab switches to "dubbed"
   useEffect(() => {
+    if (mainTab !== "dubbed") return;
     const filterParam = activeChip === 'All' ? '' : `&filter=${encodeURIComponent(activeChip)}`;
     
     // Fetch Movies grid
@@ -572,25 +596,30 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     fetch(`/api/movies?page=1&limit=20${filterParam}`)
       .then(res => res.json())
       .then(res => {
-        setAllMovies(res.data);
-        setTotalMovies(res.total);
+        setAllMovies(res.data || []);
+        setTotalMovies(res.total || 0);
         setIsLoadingMore(false);
       })
       .catch(e => {
         console.error(e);
         setIsLoadingMore(false);
       });
-  }, [activeChip]);
+  }, [activeChip, mainTab]);
 
-  // Infinite Scroll logic using IntersectionObserver (off main scroll thread)
+  // Stable state ref for Dubbed Infinite Scroll (prevents tear-down/re-attach glitch)
+  const dubbedStateRef = useRef({ page, total: totalMovies, count: allMovies.length, activeChip, loading: isLoadingMore });
+  dubbedStateRef.current = { page, total: totalMovies, count: allMovies.length, activeChip, loading: isLoadingMore };
+
+  // Infinite Scroll logic for Dubbed Movies
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const loadMoreMovies = useCallback(async () => {
-    if (isLoadingMore) return;
-    if (totalMovies > 0 && allMovies.length >= totalMovies) return;
+    const state = dubbedStateRef.current;
+    if (state.loading) return;
+    if (state.total > 0 && state.count >= state.total) return;
     setIsLoadingMore(true);
-    const nextPage = page + 1;
-    const filterParam = activeChip === 'All' ? '' : `&filter=${encodeURIComponent(activeChip)}`;
+    const nextPage = state.page + 1;
+    const filterParam = state.activeChip === 'All' ? '' : `&filter=${encodeURIComponent(state.activeChip)}`;
     try {
       const res = await fetch(`/api/movies?page=${nextPage}&limit=20${filterParam}`);
       const data = await res.json();
@@ -607,24 +636,26 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     } finally {
       setIsLoadingMore(false);
     }
-  }, [isLoadingMore, page, activeChip, totalMovies, allMovies.length]);
+  }, []);
 
   useEffect(() => {
+    if (mainTab !== "dubbed") return;
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !isLoadingMore && (totalMovies === 0 || allMovies.length < totalMovies)) {
+        const state = dubbedStateRef.current;
+        if (entries[0].isIntersecting && !state.loading && state.total > 0 && state.count < state.total) {
           loadMoreMovies();
         }
       },
-      { threshold: 0.1, rootMargin: "300px" }
+      { root: mainScrollRef.current, threshold: 0.05, rootMargin: "400px" }
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loadMoreMovies, isLoadingMore, allMovies.length, totalMovies]);
+  }, [mainTab, allMovies.length, totalMovies, loadMoreMovies]);
 
   // Fetch unique categories for Original Movies
   useEffect(() => {
@@ -661,15 +692,20 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       });
   }, [activeOriginalChip, mainTab]);
 
+  // Stable state ref for Original Infinite Scroll (prevents tear-down/re-attach glitch)
+  const originalStateRef = useRef({ page: originalPage, total: totalOriginalMovies, count: originalMovies.length, chip: activeOriginalChip, loading: isLoadingMoreOriginal });
+  originalStateRef.current = { page: originalPage, total: totalOriginalMovies, count: originalMovies.length, chip: activeOriginalChip, loading: isLoadingMoreOriginal };
+
   // Infinite Scroll logic for Original Movies
   const originalSentinelRef = useRef<HTMLDivElement>(null);
 
   const loadMoreOriginalMovies = useCallback(async () => {
-    if (isLoadingMoreOriginal) return;
-    if (totalOriginalMovies > 0 && originalMovies.length >= totalOriginalMovies) return;
+    const state = originalStateRef.current;
+    if (state.loading) return;
+    if (state.total > 0 && state.count >= state.total) return;
     setIsLoadingMoreOriginal(true);
-    const nextPage = originalPage + 1;
-    const filterParam = activeOriginalChip === 'All' ? '' : `&filter=${encodeURIComponent(activeOriginalChip)}`;
+    const nextPage = state.page + 1;
+    const filterParam = state.chip === 'All' ? '' : `&filter=${encodeURIComponent(state.chip)}`;
     try {
       const res = await fetch(`/api/original-movies?page=${nextPage}&limit=20${filterParam}`);
       const data = await res.json();
@@ -686,7 +722,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     } finally {
       setIsLoadingMoreOriginal(false);
     }
-  }, [isLoadingMoreOriginal, originalPage, activeOriginalChip, totalOriginalMovies, originalMovies.length]);
+  }, []);
 
   useEffect(() => {
     if (mainTab !== "original") return;
@@ -695,16 +731,17 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !isLoadingMoreOriginal && (totalOriginalMovies === 0 || originalMovies.length < totalOriginalMovies)) {
+        const state = originalStateRef.current;
+        if (entries[0].isIntersecting && !state.loading && state.total > 0 && state.count < state.total) {
           loadMoreOriginalMovies();
         }
       },
-      { threshold: 0.1, rootMargin: "300px" }
+      { root: mainScrollRef.current, threshold: 0.05, rootMargin: "400px" }
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loadMoreOriginalMovies, isLoadingMoreOriginal, originalMovies.length, totalOriginalMovies, mainTab]);
+  }, [mainTab, originalMovies.length, totalOriginalMovies, loadMoreOriginalMovies]);
 
   // Fetch unique categories for Web Series
   useEffect(() => {
@@ -741,15 +778,20 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
       });
   }, [activeWebSeriesChip, mainTab]);
 
+  // Stable state ref for Web Series Infinite Scroll (prevents tear-down/re-attach glitch)
+  const webSeriesStateRef = useRef({ page: webSeriesPage, total: totalWebSeries, count: webSeriesList.length, chip: activeWebSeriesChip, loading: isLoadingMoreWebSeries });
+  webSeriesStateRef.current = { page: webSeriesPage, total: totalWebSeries, count: webSeriesList.length, chip: activeWebSeriesChip, loading: isLoadingMoreWebSeries };
+
   // Infinite Scroll logic for Web Series
   const webSeriesSentinelRef = useRef<HTMLDivElement>(null);
 
   const loadMoreWebSeries = useCallback(async () => {
-    if (isLoadingMoreWebSeries) return;
-    if (totalWebSeries > 0 && webSeriesList.length >= totalWebSeries) return;
+    const state = webSeriesStateRef.current;
+    if (state.loading) return;
+    if (state.total > 0 && state.count >= state.total) return;
     setIsLoadingMoreWebSeries(true);
-    const nextPage = webSeriesPage + 1;
-    const categoryParam = activeWebSeriesChip === 'All' ? '' : `&category=${encodeURIComponent(activeWebSeriesChip)}`;
+    const nextPage = state.page + 1;
+    const categoryParam = state.chip === 'All' ? '' : `&category=${encodeURIComponent(state.chip)}`;
     try {
       const res = await fetch(`/api/web-series?page=${nextPage}&limit=20${categoryParam}`);
       const data = await res.json();
@@ -766,7 +808,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     } finally {
       setIsLoadingMoreWebSeries(false);
     }
-  }, [isLoadingMoreWebSeries, webSeriesPage, activeWebSeriesChip, totalWebSeries, webSeriesList.length]);
+  }, []);
 
   useEffect(() => {
     if (mainTab !== "webseries") return;
@@ -775,16 +817,42 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !isLoadingMoreWebSeries && (totalWebSeries === 0 || webSeriesList.length < totalWebSeries)) {
+        const state = webSeriesStateRef.current;
+        if (entries[0].isIntersecting && !state.loading && state.total > 0 && state.count < state.total) {
           loadMoreWebSeries();
         }
       },
-      { threshold: 0.1, rootMargin: "300px" }
+      { root: mainScrollRef.current, threshold: 0.05, rootMargin: "400px" }
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loadMoreWebSeries, isLoadingMoreWebSeries, webSeriesList.length, totalWebSeries, mainTab]);
+  }, [mainTab, webSeriesList.length, totalWebSeries, loadMoreWebSeries]);
+
+  // Failsafe scroll listener to guarantee infinite scrolling continues smoothly even if IntersectionObserver misses a frame
+  const handleMainScroll = useCallback(() => {
+    const el = mainScrollRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom < 600) {
+      if (mainTab === "dubbed") {
+        const state = dubbedStateRef.current;
+        if (!state.loading && state.total > 0 && state.count < state.total) {
+          loadMoreMovies();
+        }
+      } else if (mainTab === "original") {
+        const state = originalStateRef.current;
+        if (!state.loading && state.total > 0 && state.count < state.total) {
+          loadMoreOriginalMovies();
+        }
+      } else if (mainTab === "webseries") {
+        const state = webSeriesStateRef.current;
+        if (!state.loading && state.total > 0 && state.count < state.total) {
+          loadMoreWebSeries();
+        }
+      }
+    }
+  }, [mainTab, loadMoreMovies, loadMoreOriginalMovies, loadMoreWebSeries]);
 
   // Debounced Search logic (Tab aware)
   useEffect(() => {
@@ -914,7 +982,11 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
         </div>
       ) : (
         // Main Dashboard with High Performance Sticky Search Bar
-        <div className="flex-1 overflow-y-auto px-5 pt-0 pb-12 hide-scrollbar overscroll-y-contain transform-gpu [will-change:scroll-position]">
+        <div 
+          ref={mainScrollRef} 
+          onScroll={handleMainScroll}
+          className="flex-1 overflow-y-auto px-5 pt-0 pb-12 hide-scrollbar overscroll-y-contain transform-gpu [will-change:scroll-position]"
+        >
           
           {/* Top Brand Logo Header with Live Views Counter */}
           <div className="flex items-center justify-between pt-3 pb-2.5 px-0.5">
@@ -979,7 +1051,10 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                     />
                     {searchQuery && (
                       <button 
-                        onClick={() => setSearchQuery("")}
+                        onClick={() => {
+                          setSearchQuery("");
+                          setSearchSuggestions([]);
+                        }}
                         className="w-5 h-5 rounded-full bg-purple-50 text-gray-500 flex items-center justify-center hover:bg-purple-100 hover:text-gray-800 transition-colors mr-1 cursor-pointer flex-shrink-0"
                         aria-label="Clear search"
                       >
@@ -998,6 +1073,18 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                 {/* Floating Search Suggestions Dropdown */}
                 {searchQuery && (
                   <div className="absolute top-full left-0 right-0 mt-2 bg-white/98 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgba(85,60,251,0.16)] z-40 border border-purple-100/90 max-h-72 overflow-y-auto divide-y divide-purple-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center justify-between px-3.5 py-2 bg-purple-50/70 border-b border-purple-100/60 text-[11px] font-bold text-gray-500 sticky top-0 bg-white z-10">
+                      <span>{mainTab === 'dubbed' ? 'Dubbed Movies' : mainTab === 'original' ? 'Original Movies' : 'Web Series'} Results</span>
+                      <button 
+                        onClick={() => {
+                          setSearchQuery("");
+                          setSearchSuggestions([]);
+                        }}
+                        className="text-gray-400 hover:text-red-500 transition-colors flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" /> Close
+                      </button>
+                    </div>
                     {searchSuggestions.length > 0 ? (
                       searchSuggestions.map((movie) => (
                         <div
@@ -1024,6 +1111,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                               setSelectedMovie(movie);
                             }
                             setSearchQuery("");
+                            setSearchSuggestions([]);
                           }}
                         >
                           <div className="relative w-11 h-15 rounded-xl overflow-hidden flex-shrink-0 bg-placeholder shadow-xs border border-purple-100/60">
@@ -1070,7 +1158,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
             <div className="mt-2.5 p-1 bg-[#f4f5fa] rounded-[20px] flex relative border border-purple-100/60">
               {/* Tab 1: Dubbed Movies */}
               <button
-                onClick={() => setMainTab("dubbed")}
+                onClick={() => handleTabSwitch("dubbed")}
                 className={clsx(
                   "relative flex-1 py-2 rounded-[16px] text-[12px] sm:text-[13px] font-bold transition-colors z-10 cursor-pointer flex items-center justify-center gap-1 sm:gap-1.5",
                   mainTab === "dubbed" ? "text-[#553cfb]" : "text-gray-500 hover:text-gray-800"
@@ -1089,7 +1177,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
 
               {/* Tab 2: Original Movies */}
               <button
-                onClick={() => setMainTab("original")}
+                onClick={() => handleTabSwitch("original")}
                 className={clsx(
                   "relative flex-1 py-2 rounded-[16px] text-[12px] sm:text-[13px] font-bold transition-colors z-10 cursor-pointer flex items-center justify-center gap-1 sm:gap-1.5",
                   mainTab === "original" ? "text-[#553cfb]" : "text-gray-500 hover:text-gray-800"
@@ -1108,7 +1196,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
 
               {/* Tab 3: Web Series */}
               <button
-                onClick={() => setMainTab("webseries")}
+                onClick={() => handleTabSwitch("webseries")}
                 className={clsx(
                   "relative flex-1 py-2 rounded-[16px] text-[12px] sm:text-[13px] font-bold transition-colors z-10 cursor-pointer flex items-center justify-center gap-1 sm:gap-1.5",
                   mainTab === "webseries" ? "text-[#553cfb]" : "text-gray-500 hover:text-gray-800"
@@ -1214,13 +1302,21 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
               ) : null}
               
               {/* Infinite Scroll Sentinel - Triggers loading asynchronously */}
-              <div ref={sentinelRef} className="h-6 w-full pointer-events-none" />
-
-              {/* Loading spinner for infinite scroll */}
-              {isLoadingMore && (
-                <div className="flex flex-col justify-center items-center py-6 mt-2">
-                  <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
-                  <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more titles...</span>
+              {allMovies.length < totalMovies && totalMovies > 0 && (
+                <div ref={sentinelRef} className="py-6 flex flex-col justify-center items-center">
+                  {isLoadingMore ? (
+                    <div className="flex flex-col items-center">
+                      <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
+                      <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more titles...</span>
+                    </div>
+                  ) : (
+                    <div className="h-6 w-full" />
+                  )}
+                </div>
+              )}
+              {totalMovies > 0 && allMovies.length >= totalMovies && (
+                <div className="py-8 text-center text-xs text-gray-400 font-medium">
+                  ✨ You've reached the end of dubbed movies
                 </div>
               )}
             </div>
@@ -1348,7 +1444,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                       onClick={() => setSelectedMovie(movie)}
                     >
                       <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
-                        {movie.image && (
+                        {movie.image ? (
                           <Image 
                             src={movie.image} 
                             alt={movie.title} 
@@ -1357,6 +1453,10 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                             loading="lazy"
                             className="object-cover group-hover:scale-105 transition-transform duration-300" 
                           />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-purple-50 text-purple-400">
+                            <Film className="w-10 h-10" />
+                          </div>
                         )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                         {movie.rating && (
@@ -1388,13 +1488,21 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
               ) : null}
               
               {/* Infinite Scroll Sentinel for Original Movies */}
-              <div ref={originalSentinelRef} className="h-6 w-full pointer-events-none" />
-
-              {/* Loading spinner for original movies */}
-              {isLoadingMoreOriginal && (
-                <div className="flex flex-col justify-center items-center py-6 mt-2">
-                  <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
-                  <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more original titles...</span>
+              {originalMovies.length < totalOriginalMovies && totalOriginalMovies > 0 && (
+                <div ref={originalSentinelRef} className="py-6 flex flex-col justify-center items-center">
+                  {isLoadingMoreOriginal ? (
+                    <div className="flex flex-col items-center">
+                      <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
+                      <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more original titles...</span>
+                    </div>
+                  ) : (
+                    <div className="h-6 w-full" />
+                  )}
+                </div>
+              )}
+              {totalOriginalMovies > 0 && originalMovies.length >= totalOriginalMovies && (
+                <div className="py-8 text-center text-xs text-gray-400 font-medium">
+                  ✨ You've reached the end of original movies
                 </div>
               )}
             </div>
@@ -1416,50 +1524,71 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                             {watchHistoryList.length}
                           </span>
                         </h3>
-                        <p className="text-[11px] text-gray-400 font-medium">Resume where you left off</p>
+                        <p className="text-[11px] text-gray-400 font-medium">Pick up right where you left off</p>
                       </div>
                     </div>
-
                     <button
                       onClick={() => {
-                        setDrawerTab("history");
-                        setIsDrawerOpen(true);
+                        if (confirm("Clear all continue watching history?")) {
+                          clearWatchHistory();
+                        }
                       }}
-                      className="text-[11.5px] font-bold text-[#553cfb] hover:text-[#462ee6] cursor-pointer"
+                      className="text-[11px] font-semibold text-gray-400 hover:text-red-500 transition-colors cursor-pointer px-2 py-1 rounded-lg hover:bg-red-50"
                     >
-                      View All
+                      Clear
                     </button>
                   </div>
 
-                  <div className="flex items-start gap-3 overflow-x-auto pb-2 pt-1 hide-scrollbar">
-                    {watchHistoryList.slice(0, 8).map((item) => (
+                  {/* Horizontal Scroll Cards */}
+                  <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1 pt-0.5 -mx-1 px-1">
+                    {watchHistoryList.map((item) => (
                       <div
                         key={item.id}
-                        className="group flex-shrink-0 w-36 sm:w-40 cursor-pointer active:scale-[0.98] transition-transform"
+                        className="relative flex-shrink-0 w-[140px] group cursor-pointer active:scale-98 transition-transform"
                         onClick={() => handleStartStreaming(item)}
                       >
-                        <div className="relative aspect-video rounded-2xl overflow-hidden shadow-xs border border-purple-100 bg-gray-950">
-                          {item.image && (
+                        <div className="relative aspect-[2/3] w-full rounded-[18px] overflow-hidden shadow-[0_4px_14px_rgba(0,0,0,0.12)] border border-purple-100/80 bg-gray-950">
+                          {item.image ? (
                             <Image
                               src={item.image}
                               alt={item.title}
                               fill
-                              sizes="160px"
-                              className="object-cover group-hover:scale-105 transition-transform duration-300"
+                              sizes="140px"
+                              className="object-cover group-hover:scale-105 transition-transform duration-300 opacity-90"
                             />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-[#553cfb]/10 text-[#553cfb]">
+                              <Tv className="w-8 h-8" />
+                            </div>
                           )}
-                          <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                            <div className="w-9 h-9 rounded-full bg-white/95 text-[#553cfb] flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                              <Play className="w-4 h-4 fill-current ml-0.5" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none" />
+
+                          {/* Center Play Button Overlay */}
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-9 h-9 rounded-full bg-[#553cfb]/90 hover:bg-[#553cfb] text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                              <Play className="w-4 h-4 fill-white ml-0.5" />
                             </div>
                           </div>
 
-                          <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/90 to-transparent">
-                            <div className="flex items-center justify-between text-[9.5px] font-bold text-white/90 mb-1 px-0.5">
-                              <span>{item.progressPercent}% Watched</span>
-                              <span>{item.duration || "Resume"}</span>
+                          {/* Delete Item Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeWatchHistoryItem(item.id);
+                            }}
+                            className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/65 hover:bg-red-600 text-white flex items-center justify-center transition-colors cursor-pointer"
+                            title="Remove"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Bottom Progress Bar & Indicator */}
+                          <div className="absolute bottom-0 left-0 right-0 p-2 pt-0">
+                            <div className="flex items-center justify-between text-[9.5px] font-bold text-white mb-1">
+                              <span className="text-emerald-400 font-extrabold">{item.progressPercent}% watched</span>
+                              <span className="text-gray-300 text-[9px]">{item.duration || "Cinema"}</span>
                             </div>
-                            <div className="w-full h-1.5 bg-white/30 rounded-full overflow-hidden">
+                            <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-gradient-to-r from-[#553cfb] via-[#7b46fa] to-emerald-400 rounded-full transition-all duration-300"
                                 style={{ width: `${Math.min(100, Math.max(8, item.progressPercent))}%` }}
@@ -1504,7 +1633,7 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                       }}
                     >
                       <div className="relative aspect-[2/3] w-full rounded-[22px] overflow-hidden mb-2 shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-purple-50/80 bg-placeholder group-hover:shadow-[0_6px_20px_rgba(85,60,251,0.16)] transition-shadow">
-                        {series.poster && (
+                        {series.poster ? (
                           <Image 
                             src={series.poster} 
                             alt={series.title} 
@@ -1513,6 +1642,10 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                             loading="lazy"
                             className="object-cover group-hover:scale-105 transition-transform duration-300" 
                           />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-purple-50 text-purple-400">
+                            <Tv className="w-10 h-10" />
+                          </div>
                         )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                         
@@ -1551,12 +1684,21 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
               ) : null}
 
               {/* Infinite Scroll Sentinel for Web Series */}
-              <div ref={webSeriesSentinelRef} className="h-6 w-full pointer-events-none" />
-
-              {isLoadingMoreWebSeries && (
-                <div className="flex flex-col justify-center items-center py-6 mt-2">
-                  <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
-                  <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more series...</span>
+              {webSeriesList.length < totalWebSeries && totalWebSeries > 0 && (
+                <div ref={webSeriesSentinelRef} className="py-6 flex flex-col justify-center items-center">
+                  {isLoadingMoreWebSeries ? (
+                    <div className="flex flex-col items-center">
+                      <div className="animate-spin rounded-full h-7 w-7 border-3 border-[#553cfb] border-t-transparent"></div>
+                      <span className="text-[12px] text-gray-400 font-medium mt-2">Loading more series...</span>
+                    </div>
+                  ) : (
+                    <div className="h-6 w-full" />
+                  )}
+                </div>
+              )}
+              {totalWebSeries > 0 && webSeriesList.length >= totalWebSeries && (
+                <div className="py-8 text-center text-xs text-gray-400 font-medium">
+                  ✨ You've reached the end of web series
                 </div>
               )}
             </div>
@@ -1742,21 +1884,12 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                     <div className="flex items-center gap-2 pb-2 mt-auto">
                       <button 
                         onClick={() => {
-                          setSelectedAction("watch");
-                          setShowDownloadOptions(true);
-                        }}
-                        className="flex-1 bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-105 active:scale-[0.98] text-white rounded-[18px] py-3.5 flex items-center justify-center gap-1.5 font-bold text-[13.5px] transition-all shadow-[0_4px_16px_rgba(85,60,251,0.3)] cursor-pointer"
-                      >
-                        <Play className="w-4 h-4 fill-current ml-0.5" /> Watch Now
-                      </button>
-                      <button 
-                        onClick={() => {
                           setSelectedAction("download");
                           setShowDownloadOptions(true);
                         }}
-                        className="flex-1 bg-[#f8f9fe] hover:bg-purple-100/50 border border-purple-100 text-gray-800 rounded-[18px] py-3.5 flex items-center justify-center gap-1.5 font-bold text-[13.5px] transition-all active:scale-[0.98] cursor-pointer"
+                        className="flex-1 bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-105 active:scale-[0.98] text-white rounded-[18px] py-3.5 flex items-center justify-center gap-2 font-bold text-[14px] transition-all shadow-[0_4px_16px_rgba(85,60,251,0.3)] cursor-pointer"
                       >
-                        <Download className="w-4 h-4 text-[#553cfb]" /> Download HD
+                        <Download className="w-4.5 h-4.5" /> Download in HD
                       </button>
                       <button
                         onClick={() => setShowShareSheet(true)}
@@ -1805,7 +1938,9 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                     <Share2 className="w-4.5 h-4.5" />
                   </div>
                   <div>
-                    <h3 className="text-[15px] font-bold text-gray-900 leading-tight">Share Movie</h3>
+                    <h3 className="text-[15px] font-bold text-gray-900 leading-tight">
+                      {selectedMovie.type === 'webseries' || selectedMovie.id?.startsWith('series_') ? "Share Web Series" : "Share Movie"}
+                    </h3>
                     <p className="text-[11.5px] text-gray-500 font-medium truncate max-w-[230px]">
                       {selectedMovie.title}
                     </p>
@@ -1864,7 +1999,9 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                   </div>
                   <div className="min-w-0">
                     <span className="block text-[13px] font-bold text-gray-900">Copy Link</span>
-                    <span className="block text-[10.5px] text-gray-500 truncate">Direct movie URL</span>
+                    <span className="block text-[10.5px] text-gray-500 truncate">
+                      {selectedMovie.type === 'webseries' || selectedMovie.id?.startsWith('series_') ? "Direct series URL" : "Direct movie URL"}
+                    </span>
                   </div>
                 </button>
 
@@ -2059,12 +2196,38 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setSelectedSeriesForEpisodes(null)}
-                  className="w-8 h-8 rounded-full bg-[#f8f9fe] hover:bg-gray-200 text-gray-500 flex items-center justify-center cursor-pointer transition-colors flex-shrink-0"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      const seriesAsMovie: Movie = {
+                        id: selectedSeriesForEpisodes.id,
+                        tmdbId: selectedSeriesForEpisodes.tmdbId,
+                        title: selectedSeriesForEpisodes.title,
+                        image: selectedSeriesForEpisodes.poster,
+                        rating: selectedSeriesForEpisodes.rating || '9.0',
+                        genre: selectedSeriesForEpisodes.genre || selectedSeriesForEpisodes.category || 'Hindi Web Series',
+                        category: selectedSeriesForEpisodes.category || 'Hindi Web Series',
+                        duration: `${selectedSeriesForEpisodes.totalSeasons || 1} Seasons`,
+                        overview: selectedSeriesForEpisodes.overview,
+                        type: 'webseries',
+                        isOriginal: false
+                      };
+                      setSelectedMovie(seriesAsMovie);
+                      setShowShareSheet(true);
+                    }}
+                    className="w-8 h-8 rounded-full bg-purple-50 hover:bg-purple-100/80 border border-purple-200/80 flex items-center justify-center text-[#553cfb] transition-all active:scale-95 cursor-pointer shadow-2xs"
+                    title="Share Web Series"
+                    aria-label="Share Web Series"
+                  >
+                    <Share2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setSelectedSeriesForEpisodes(null)}
+                    className="w-8 h-8 rounded-full bg-[#f8f9fe] hover:bg-gray-200 text-gray-500 flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Season Selector Tabs */}
@@ -2140,9 +2303,9 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                     >
                       {/* Episode Thumbnail */}
                       <div className="relative w-28 sm:w-32 aspect-video rounded-xl overflow-hidden flex-shrink-0 bg-gray-900 border border-purple-100/80 shadow-2xs">
-                        {ep.thumbnail && (
+                        {(ep.thumbnail || selectedSeriesForEpisodes.poster) && (
                           <Image
-                            src={ep.thumbnail}
+                            src={ep.thumbnail || selectedSeriesForEpisodes.poster}
                             alt={ep.title}
                             fill
                             sizes="130px"
