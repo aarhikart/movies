@@ -134,6 +134,6 @@ export function getAllWebSeries(): WebSeriesShow[] {
   return [];
 }
 
-export { parseDateToTimestamp, formatReleaseMonth, getYearFromDate } from './dateHelper';
+export { parseDateToTimestamp, formatReleaseMonth, getYearFromDate, isHindiOrBollywood, compareCatalogItems } from './dateHelper';
 
 

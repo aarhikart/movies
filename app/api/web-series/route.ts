@@ -1,10 +1,34 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { WebSeriesShow, parseDateToTimestamp, getYearFromDate } from '@/lib/movieHelper';
+import { WebSeriesShow, parseDateToTimestamp, getYearFromDate, compareCatalogItems } from '@/lib/movieHelper';
 
 function getSeriesDate(s: WebSeriesShow): string {
   return s.releaseDate || s.seasons?.[0]?.episodes?.[0]?.airDate || '';
+}
+
+let cachedSortedSeries: WebSeriesShow[] | null = null;
+let lastSeriesFileMtime = 0;
+
+function getSortedWebSeries(): WebSeriesShow[] {
+  const filePath = path.join(process.cwd(), 'app', 'web_series.json');
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const stats = fs.statSync(filePath);
+    if (cachedSortedSeries && stats.mtimeMs === lastSeriesFileMtime) {
+      return cachedSortedSeries;
+    }
+    const fileContents = fs.readFileSync(filePath, 'utf8');
+    const list: WebSeriesShow[] = JSON.parse(fileContents);
+    // Sort: Current month first, then Last month, with Hindi/Bollywood prioritized first
+    list.sort((a, b) => compareCatalogItems(a, b, getSeriesDate));
+    cachedSortedSeries = list;
+    lastSeriesFileMtime = stats.mtimeMs;
+    return cachedSortedSeries;
+  } catch (e) {
+    console.error("Failed to load web_series.json", e);
+    return cachedSortedSeries || [];
+  }
 }
 
 export async function GET(request: Request) {
@@ -18,28 +42,8 @@ export async function GET(request: Request) {
     const id = (searchParams.get('id') || '').trim();
     const tmdbId = (searchParams.get('tmdbId') || '').trim();
 
-    const filePath = path.join(process.cwd(), 'app', 'web_series.json');
-    if (!fs.existsSync(filePath)) {
-      return NextResponse.json({
-        success: true,
-        data: [],
-        total: 0,
-        page: 1,
-        totalPages: 0,
-        categories: ["All", "Hindi Web Series"],
-        years: ["All", "2026", "2024"]
-      });
-    }
-
-    const fileContents = fs.readFileSync(filePath, 'utf8');
-    let seriesList: WebSeriesShow[] = JSON.parse(fileContents);
-
-    // Sort chronologically descending: newest release / air date first
-    seriesList.sort((a, b) => {
-      const dateA = getSeriesDate(a);
-      const dateB = getSeriesDate(b);
-      return parseDateToTimestamp(dateB, b.title) - parseDateToTimestamp(dateA, a.title);
-    });
+    const allSeries = getSortedWebSeries();
+    let seriesList = [...allSeries];
 
     // Single item query
     if (id || tmdbId) {

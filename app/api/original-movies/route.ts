@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { parseDateToTimestamp, getYearFromDate } from '@/lib/movieHelper';
+import { parseDateToTimestamp, getYearFromDate, compareCatalogItems } from '@/lib/movieHelper';
 
 let cachedSortedOrig: any[] | null = null;
 let lastOrigFileMtime = 0;
@@ -16,7 +16,8 @@ function getSortedOrigMovies(): any[] {
     }
     const fileContents = fs.readFileSync(filePath, 'utf8');
     const list: any[] = JSON.parse(fileContents);
-    list.sort((a, b) => parseDateToTimestamp(b.releaseDate, b.title) - parseDateToTimestamp(a.releaseDate, a.title));
+    // Sort: Current month first, then Last month, with Hindi/HI prioritized first
+    list.sort((a, b) => compareCatalogItems(a, b, (m) => m.releaseDate));
     cachedSortedOrig = list;
     lastOrigFileMtime = stats.mtimeMs;
     return cachedSortedOrig;

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getFilterForCategory } from '../../categoryHelper';
-import { getMovieById, parseDateToTimestamp, getYearFromDate } from '@/lib/movieHelper';
+import { getMovieById, parseDateToTimestamp, getYearFromDate, compareCatalogItems } from '@/lib/movieHelper';
 
 let cachedSortedMovies: any[] | null = null;
 let lastMoviesFileMtime = 0;
@@ -17,8 +17,8 @@ function getSortedMovies(): any[] {
     }
     const fileContents = fs.readFileSync(filePath, 'utf8');
     const list: any[] = JSON.parse(fileContents);
-    // Sort chronologically descending: newest release date first
-    list.sort((a, b) => parseDateToTimestamp(b.releaseDate, b.title) - parseDateToTimestamp(a.releaseDate, a.title));
+    // Sort: Current month first, then Last month, with Hindi/Bollywood prioritized first
+    list.sort((a, b) => compareCatalogItems(a, b, (m) => m.releaseDate));
     cachedSortedMovies = list;
     lastMoviesFileMtime = stats.mtimeMs;
     return cachedSortedMovies;
@@ -54,7 +54,10 @@ export async function GET(request: Request) {
   // Search filtering
   if (q) {
     const query = q.toLowerCase();
-    results = results.filter((m: any) => m.title.toLowerCase().includes(query));
+    results = results.filter((m: any) => 
+      (m.title && m.title.toLowerCase().includes(query)) ||
+      (m.starcast && m.starcast.toLowerCase().includes(query))
+    );
   }
 
   // Category filtering using mapped category names

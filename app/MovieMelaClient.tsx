@@ -72,6 +72,10 @@ type Movie = {
   playUrl?: string;
   watchUrl?: string;
   streamServers?: { name: string; url: string }[];
+  totalSeasons?: number;
+  totalEpisodes?: number;
+  seasons?: any[];
+  score?: number;
 };
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -160,6 +164,8 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
   
   const [searchSuggestions, setSearchSuggestions] = useState<Movie[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchTypeFilter, setSearchTypeFilter] = useState<"all" | "dubbed" | "original" | "webseries">("all");
+  const [searchCounts, setSearchCounts] = useState({ all: 0, dubbed: 0, original: 0, webseries: 0 });
   
   const [page, setPage] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -883,50 +889,36 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
     }
   }, [mainTab, loadMoreMovies, loadMoreOriginalMovies, loadMoreWebSeries]);
 
-  // Debounced Search logic (Tab aware)
+  // Debounced Common Search logic (Searches across Dubbed, Original, and Web Series simultaneously)
   useEffect(() => {
-    if (searchQuery.trim() === "") {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
       setSearchSuggestions([]);
+      setSearchCounts({ all: 0, dubbed: 0, original: 0, webseries: 0 });
       return;
     }
     
     setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
-        let endpoint = `/api/movies?q=${encodeURIComponent(searchQuery)}&limit=10`;
-        if (mainTab === 'original') {
-          endpoint = `/api/original-movies?q=${encodeURIComponent(searchQuery)}&limit=10`;
-        } else if (mainTab === 'webseries') {
-          endpoint = `/api/web-series?search=${encodeURIComponent(searchQuery)}&limit=10`;
-        }
-        const res = await fetch(endpoint);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&limit=50`);
         const data = await res.json();
-        if (mainTab === 'webseries') {
-          const mapped = (data.data || []).map((s: WebSeriesShow) => ({
-            id: s.id,
-            tmdbId: s.tmdbId,
-            title: s.title,
-            image: s.poster,
-            rating: s.rating || '9.0',
-            genre: s.genre || 'Hindi Web Series',
-            category: s.category || 'Hindi Web Series',
-            duration: `${s.totalSeasons || 1} Seasons`,
-            overview: s.overview,
-            type: 'webseries'
-          }));
-          setSearchSuggestions(mapped);
+        if (data.success) {
+          setSearchSuggestions(data.results || []);
+          setSearchCounts(data.counts || { all: 0, dubbed: 0, original: 0, webseries: 0 });
         } else {
-          setSearchSuggestions(data.data || []);
+          setSearchSuggestions([]);
+          setSearchCounts({ all: 0, dubbed: 0, original: 0, webseries: 0 });
         }
       } catch (e) {
-        console.error(e);
+        console.error("Common search error:", e);
       } finally {
         setIsSearching(false);
       }
-    }, 300);
+    }, 250);
     
     return () => clearTimeout(timer);
-  }, [searchQuery, mainTab]);
+  }, [searchQuery]);
 
   return (
     <div className="relative w-full max-w-[430px] sm:max-w-[460px] mx-auto h-[100dvh] bg-white text-slate-900 shadow-[0_0_60px_rgba(85,60,251,0.08)] border-x border-purple-100/50 overflow-hidden flex flex-col font-sans">
@@ -1073,16 +1065,23 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                     <Search className="text-[#553cfb] w-4 h-4 mr-2 flex-shrink-0 transition-transform group-focus-within:scale-110" />
                     <input
                       type="text"
-                      placeholder="Search movies, series, actors..."
+                      placeholder="Search across all movies & series..."
                       className="bg-transparent flex-1 outline-none text-[13.5px] font-medium placeholder:text-gray-400 text-gray-800 min-w-0"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
                     />
                     {searchQuery && (
                       <button 
                         onClick={() => {
                           setSearchQuery("");
                           setSearchSuggestions([]);
+                          setSearchTypeFilter("all");
                         }}
                         className="w-5 h-5 rounded-full bg-purple-50 text-gray-500 flex items-center justify-center hover:bg-purple-100 hover:text-gray-800 transition-colors mr-1 cursor-pointer flex-shrink-0"
                         aria-label="Clear search"
@@ -1099,32 +1098,105 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                   </div>
                 </div>
 
-                {/* Floating Search Suggestions Dropdown */}
+                {/* Floating Common Search Suggestions Dropdown */}
                 {searchQuery && (
-                  <div className="absolute top-full left-0 right-0 mt-2 bg-white/98 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgba(85,60,251,0.16)] z-40 border border-purple-100/90 max-h-72 overflow-y-auto divide-y divide-purple-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="flex items-center justify-between px-3.5 py-2 bg-purple-50/70 border-b border-purple-100/60 text-[11px] font-bold text-gray-500 sticky top-0 bg-white z-10">
-                      <span>{mainTab === 'dubbed' ? 'Dubbed Movies' : mainTab === 'original' ? 'Original Movies' : 'Web Series'} Results</span>
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white/98 backdrop-blur-xl rounded-2xl shadow-[0_16px_50px_rgba(85,60,251,0.22)] z-40 border border-purple-100/90 max-h-[75vh] sm:max-h-[520px] overflow-y-auto divide-y divide-purple-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    
+                    {/* Header: Title & Close */}
+                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-gradient-to-r from-purple-50/90 via-white to-indigo-50/80 border-b border-purple-100 sticky top-0 bg-white/95 backdrop-blur-md z-20">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Sparkles className="w-3.5 h-3.5 text-[#553cfb] flex-shrink-0" />
+                        <span className="text-[12px] font-extrabold text-gray-800 truncate">
+                          All Catalogs Search
+                        </span>
+                        <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-[#553cfb]/10 text-[#553cfb] border border-purple-200 flex-shrink-0">
+                          {searchCounts.all} found
+                        </span>
+                      </div>
                       <button 
                         onClick={() => {
                           setSearchQuery("");
                           setSearchSuggestions([]);
+                          setSearchTypeFilter("all");
                         }}
-                        className="text-gray-400 hover:text-red-500 transition-colors flex items-center gap-0.5 cursor-pointer"
+                        className="text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1 text-[11px] font-bold cursor-pointer flex-shrink-0 pl-2"
                       >
                         <X className="w-3 h-3" /> Close
                       </button>
                     </div>
-                    {searchSuggestions.length > 0 ? (
-                      searchSuggestions.map((movie) => (
+
+                    {/* Filter Pills Bar: All | Dubbed | Original | Web Series */}
+                    <div className="px-3 py-2 bg-[#f8f9fe]/95 border-b border-purple-100/60 sticky top-[41px] bg-white/95 backdrop-blur-md z-10 flex items-center gap-1.5 overflow-x-auto hide-scrollbar">
+                      <button
+                        type="button"
+                        onClick={() => setSearchTypeFilter("all")}
+                        className={clsx(
+                          "px-2.5 py-1 rounded-full text-[10.5px] font-bold whitespace-nowrap transition-all cursor-pointer flex-shrink-0",
+                          searchTypeFilter === "all"
+                            ? "bg-[#553cfb] text-white shadow-xs"
+                            : "bg-white text-gray-600 hover:bg-purple-50 border border-purple-100"
+                        )}
+                      >
+                        All ({searchCounts.all})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSearchTypeFilter("dubbed")}
+                        className={clsx(
+                          "px-2.5 py-1 rounded-full text-[10.5px] font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1 flex-shrink-0",
+                          searchTypeFilter === "dubbed"
+                            ? "bg-blue-600 text-white shadow-xs"
+                            : "bg-white text-gray-600 hover:bg-blue-50 border border-purple-100"
+                        )}
+                      >
+                        <Film className="w-2.5 h-2.5" /> Dubbed ({searchCounts.dubbed})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSearchTypeFilter("original")}
+                        className={clsx(
+                          "px-2.5 py-1 rounded-full text-[10.5px] font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1 flex-shrink-0",
+                          searchTypeFilter === "original"
+                            ? "bg-[#7b46fa] text-white shadow-xs"
+                            : "bg-white text-gray-600 hover:bg-purple-50 border border-purple-100"
+                        )}
+                      >
+                        <Sparkles className="w-2.5 h-2.5" /> Original ({searchCounts.original})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSearchTypeFilter("webseries")}
+                        className={clsx(
+                          "px-2.5 py-1 rounded-full text-[10.5px] font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1 flex-shrink-0",
+                          searchTypeFilter === "webseries"
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "bg-white text-gray-600 hover:bg-amber-50 border border-purple-100"
+                        )}
+                      >
+                        <Tv className="w-2.5 h-2.5" /> Web Series ({searchCounts.webseries})
+                      </button>
+                    </div>
+
+                    {/* Results list */}
+                    {isSearching ? (
+                      <div className="py-8 flex flex-col items-center justify-center gap-2 text-gray-400">
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-[#553cfb] border-t-transparent"></div>
+                        <span className="text-[11.5px] font-medium text-gray-500">Searching all catalogs...</span>
+                      </div>
+                    ) : (searchTypeFilter === "all" ? searchSuggestions : searchSuggestions.filter((item) => item.type === searchTypeFilter)).length > 0 ? (
+                      (searchTypeFilter === "all" ? searchSuggestions : searchSuggestions.filter((item) => item.type === searchTypeFilter)).map((movie) => (
                         <div
-                          key={movie.id}
-                          className="flex items-center gap-3 p-3 hover:bg-purple-50/60 cursor-pointer transition-colors"
+                          key={`${movie.type || 'movie'}_${movie.id}`}
+                          className="flex items-center gap-3 p-3 hover:bg-purple-50/60 cursor-pointer transition-colors group"
                           onClick={() => {
                             if (movie.type === 'webseries' || movie.id.startsWith('series_')) {
                               const foundSeries = webSeriesList.find(s => s.id === movie.id || s.tmdbId === movie.tmdbId);
                               if (foundSeries) {
                                 setSelectedSeriesForEpisodes(foundSeries);
                                 setActiveSeasonNumber(foundSeries.seasons?.[0]?.seasonNumber || 1);
+                              } else if (movie.seasons && movie.seasons.length > 0) {
+                                setSelectedSeriesForEpisodes(movie as any);
+                                setActiveSeasonNumber(movie.seasons[0]?.seasonNumber || 1);
                               } else {
                                 fetch(`/api/web-series?id=${movie.id}`)
                                   .then(r => r.json())
@@ -1136,29 +1208,89 @@ export default function MovieMelaClient({ initialMovieId }: { initialMovieId?: s
                                   })
                                   .catch(() => {});
                               }
+                            } else if (movie.type === 'original' || movie.isOriginal) {
+                              setSelectedMovie({
+                                ...movie,
+                                isOriginal: true,
+                                streamServers: movie.streamServers || getServersForMovie(movie)
+                              });
                             } else {
                               setSelectedMovie(movie);
                             }
                             setSearchQuery("");
                             setSearchSuggestions([]);
+                            setSearchTypeFilter("all");
                           }}
                         >
-                          <div className="relative w-11 h-15 rounded-xl overflow-hidden flex-shrink-0 bg-placeholder shadow-xs border border-purple-100/60">
-                            {movie.image && <Image src={movie.image} alt={movie.title} fill className="object-cover" />}
+                          <div className="relative w-12 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-placeholder shadow-xs border border-purple-100/60 group-hover:scale-105 transition-transform">
+                            {movie.image && <Image src={movie.image} alt={movie.title} fill sizes="48px" className="object-cover" />}
                           </div>
+                          
                           <div className="flex-1 min-w-0">
-                            <h4 className="text-[13px] font-bold text-gray-900 truncate leading-snug">{movie.title}</h4>
-                            <p className="text-[11px] text-[#553cfb] font-medium truncate mt-0.5">{movie.genre || "Cinema"}</p>
+                            <h4 className="text-[13px] font-bold text-gray-900 group-hover:text-[#553cfb] truncate leading-snug transition-colors">
+                              {movie.title}
+                            </h4>
+                            
+                            {movie.starcast && (
+                              <p className="text-[10.5px] text-gray-500 font-medium truncate mt-0.5">
+                                <span className="text-[#553cfb] font-bold">Cast:</span> {movie.starcast}
+                              </p>
+                            )}
+                            
+                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                              {movie.type === 'dubbed' ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-extrabold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+                                  <Film className="w-2.5 h-2.5" /> Dubbed
+                                </span>
+                              ) : movie.type === 'original' ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-extrabold uppercase tracking-wider bg-purple-50 text-[#553cfb] border border-purple-200">
+                                  <Sparkles className="w-2.5 h-2.5" /> Original
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-extrabold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
+                                  <Tv className="w-2.5 h-2.5" /> Web Series
+                                </span>
+                              )}
+                              
+                              <span className="text-[11px] text-gray-500 font-medium truncate">
+                                {movie.genre || movie.category || "Cinema"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-[10.5px] text-gray-400 font-medium mt-1">
+                              {movie.releaseDate && (
+                                <span className="flex items-center gap-0.5 text-gray-500 font-semibold">
+                                  <Calendar className="w-2.5 h-2.5 text-[#553cfb]" />
+                                  {movie.releaseDate.slice(0, 4) || movie.releaseDate}
+                                </span>
+                              )}
+                              {movie.quality && (
+                                <span className="text-[9.5px] font-bold text-purple-600 bg-purple-50 px-1 py-0.2 rounded border border-purple-100">
+                                  {movie.quality}
+                                </span>
+                              )}
+                              {movie.duration && (
+                                <span className="text-gray-400 truncate max-w-[120px]">
+                                  {movie.duration}
+                                </span>
+                              )}
+                            </div>
                           </div>
+
                           {movie.rating && (
-                            <span className="text-[11px] font-bold text-amber-500 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-0.5 flex-shrink-0">
-                              ★ {movie.rating}
+                            <span className="text-[11px] font-black text-amber-600 bg-amber-50 border border-amber-200/80 px-2 py-1 rounded-lg flex items-center gap-0.5 flex-shrink-0 shadow-2xs">
+                              <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500" /> {movie.rating}
                             </span>
                           )}
                         </div>
                       ))
                     ) : (
-                      !isSearching && <div className="p-4 text-center text-[13px] text-gray-500 font-medium">No results found matching "{searchQuery}"</div>
+                      <div className="py-8 px-4 text-center">
+                        <p className="text-[13px] font-bold text-gray-700">No results found</p>
+                        <p className="text-[11.5px] text-gray-400 mt-1 max-w-xs mx-auto">
+                          No matches for "{searchQuery}" in {searchTypeFilter === "all" ? "Dubbed, Original, or Web Series" : searchTypeFilter}. Try checking for typos or searching by actor/genre.
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}

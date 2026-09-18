@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { 
   ArrowLeft, 
   CheckCircle, 
@@ -15,7 +15,10 @@ import {
   Activity,
   Sparkles,
   Layers,
-  Tv
+  Tv,
+  UploadCloud,
+  FileCode,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -46,6 +49,9 @@ export default function AdminPage() {
   // Dubbed Movie HTML Importer state
   const [htmlInput, setHtmlInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [dubbedFileName, setDubbedFileName] = useState<string | null>(null);
+  const [isDraggingDubbed, setIsDraggingDubbed] = useState(false);
+  const dubbedFileInputRef = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<{
     success: boolean;
     message: string;
@@ -56,6 +62,9 @@ export default function AdminPage() {
   // Original Movies HTML Importer state
   const [originalHtmlInput, setOriginalHtmlInput] = useState("");
   const [isOriginalLoading, setIsOriginalLoading] = useState(false);
+  const [originalFileName, setOriginalFileName] = useState<string | null>(null);
+  const [isDraggingOriginal, setIsDraggingOriginal] = useState(false);
+  const originalFileInputRef = useRef<HTMLInputElement>(null);
   const [originalResult, setOriginalResult] = useState<{
     success: boolean;
     message: string;
@@ -66,6 +75,9 @@ export default function AdminPage() {
   // Web Series HTML Importer state
   const [webSeriesHtmlInput, setWebSeriesHtmlInput] = useState("");
   const [isWebSeriesLoading, setIsWebSeriesLoading] = useState(false);
+  const [webSeriesFileName, setWebSeriesFileName] = useState<string | null>(null);
+  const [isDraggingWebSeries, setIsDraggingWebSeries] = useState(false);
+  const webSeriesFileInputRef = useRef<HTMLInputElement>(null);
   const [webSeriesResult, setWebSeriesResult] = useState<{
     success: boolean;
     message: string;
@@ -106,9 +118,16 @@ export default function AdminPage() {
     fetchStats();
   }, [fetchStats]);
 
-  const handleGenerate = async () => {
-    if (!htmlInput.trim()) {
-      setResult({ success: false, message: "Please paste some HTML code first." });
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const handleGenerate = async (overrideHtml?: string) => {
+    const content = typeof overrideHtml === "string" ? overrideHtml : htmlInput;
+    if (!content.trim()) {
+      setResult({ success: false, message: "Please paste or upload HTML code first." });
       return;
     }
 
@@ -121,7 +140,7 @@ export default function AdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ html: htmlInput, catalog: "dubbed" }),
+        body: JSON.stringify({ html: content, catalog: "dubbed" }),
       });
 
       const data = await res.json();
@@ -148,9 +167,10 @@ export default function AdminPage() {
     }
   };
 
-  const handleGenerateOriginal = async () => {
-    if (!originalHtmlInput.trim()) {
-      setOriginalResult({ success: false, message: "Please paste some HTML table rows first." });
+  const handleGenerateOriginal = async (overrideHtml?: string) => {
+    const content = typeof overrideHtml === "string" ? overrideHtml : originalHtmlInput;
+    if (!content.trim()) {
+      setOriginalResult({ success: false, message: "Please paste or upload HTML table rows first." });
       return;
     }
 
@@ -163,7 +183,7 @@ export default function AdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ html: originalHtmlInput, catalog: "original" }),
+        body: JSON.stringify({ html: content, catalog: "original" }),
       });
 
       const data = await res.json();
@@ -190,9 +210,10 @@ export default function AdminPage() {
     }
   };
 
-  const handleGenerateWebSeries = async () => {
-    if (!webSeriesHtmlInput.trim()) {
-      setWebSeriesResult({ success: false, message: "Please paste some HTML table rows first." });
+  const handleGenerateWebSeries = async (overrideHtml?: string) => {
+    const content = typeof overrideHtml === "string" ? overrideHtml : webSeriesHtmlInput;
+    if (!content.trim()) {
+      setWebSeriesResult({ success: false, message: "Please paste or upload HTML table rows first." });
       return;
     }
 
@@ -205,7 +226,7 @@ export default function AdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ html: webSeriesHtmlInput, catalog: "web_series" }),
+        body: JSON.stringify({ html: content, catalog: "web_series" }),
       });
 
       const data = await res.json();
@@ -231,6 +252,49 @@ export default function AdminPage() {
     } finally {
       setIsWebSeriesLoading(false);
     }
+  };
+
+  const handleFileUpload = (
+    file: File,
+    catalogType: "dubbed" | "original" | "web_series"
+  ) => {
+    if (!file) return;
+    const fileLabel = `${file.name} (${formatFileSize(file.size)})`;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = (e.target?.result as string) || "";
+      if (!text.trim()) {
+        const errorMsg = "The uploaded file is empty.";
+        if (catalogType === "dubbed") setResult({ success: false, message: errorMsg });
+        else if (catalogType === "original") setOriginalResult({ success: false, message: errorMsg });
+        else setWebSeriesResult({ success: false, message: errorMsg });
+        return;
+      }
+
+      if (catalogType === "dubbed") {
+        setDubbedFileName(fileLabel);
+        setHtmlInput(text);
+        handleGenerate(text);
+      } else if (catalogType === "original") {
+        setOriginalFileName(fileLabel);
+        setOriginalHtmlInput(text);
+        handleGenerateOriginal(text);
+      } else if (catalogType === "web_series") {
+        setWebSeriesFileName(fileLabel);
+        setWebSeriesHtmlInput(text);
+        handleGenerateWebSeries(text);
+      }
+    };
+
+    reader.onerror = () => {
+      const errorMsg = "Failed to read the file.";
+      if (catalogType === "dubbed") setResult({ success: false, message: errorMsg });
+      else if (catalogType === "original") setOriginalResult({ success: false, message: errorMsg });
+      else setWebSeriesResult({ success: false, message: errorMsg });
+    };
+
+    reader.readAsText(file);
   };
 
   const formatTimestamp = (dateStr: string) => {
@@ -546,10 +610,15 @@ export default function AdminPage() {
         {activeTab === "importer" && (
           <div className="bg-white rounded-2xl border border-purple-100 p-6 shadow-[0_4px_20px_rgba(85,60,251,0.05)] space-y-5">
             <div>
-              <h2 className="text-lg font-black text-gray-900">Add & Update Movie Catalog</h2>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-purple-50 text-[#553cfb] border border-purple-200">
+                  Dubbed Movies
+                </span>
+                <h2 className="text-lg font-black text-gray-900">Add & Update Movie Catalog</h2>
+              </div>
               <p className="text-xs sm:text-sm text-gray-500 mt-1">
-                Paste your newly scraped HTML code (containing the <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;div class="card"&gt;</code> blocks) into the box below.
-                Clicking "Generate & Save" will automatically convert it to JSON and update the catalog database.
+                Upload an HTML file or paste scraped HTML containing <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;div class="card"&gt;</code> blocks.
+                Uploading a file will automatically extract the HTML and save into the database immediately.
               </p>
             </div>
 
@@ -579,6 +648,103 @@ export default function AdminPage() {
               </div>
             )}
 
+            {/* Upload HTML File Area */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingDubbed(true);
+              }}
+              onDragLeave={() => setIsDraggingDubbed(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingDubbed(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleFileUpload(file, "dubbed");
+              }}
+              className={`rounded-2xl border-2 border-dashed p-5 transition-all flex flex-col sm:flex-row items-center justify-between gap-4 ${
+                isDraggingDubbed
+                  ? "border-[#553cfb] bg-[#553cfb]/5 scale-[1.01]"
+                  : "border-purple-200 hover:border-[#553cfb]/60 bg-gradient-to-r from-purple-50/40 via-[#f8f9fe] to-indigo-50/30"
+              }`}
+            >
+              <input
+                type="file"
+                ref={dubbedFileInputRef}
+                accept=".html,.htm,.txt,text/html,text/plain"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileUpload(file, "dubbed");
+                  e.target.value = "";
+                }}
+              />
+
+              <div className="flex items-center gap-3.5 w-full sm:w-auto">
+                <div className="w-12 h-12 rounded-xl bg-white border border-purple-100 shadow-xs flex items-center justify-center text-[#553cfb] flex-shrink-0">
+                  {isLoading ? (
+                    <RefreshCw className="w-6 h-6 animate-spin text-[#553cfb]" />
+                  ) : (
+                    <UploadCloud className="w-6 h-6 text-[#553cfb]" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-extrabold text-gray-900">
+                      Upload Movie HTML File
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      ⚡ Auto Extract & Save
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {dubbedFileName ? (
+                      <span className="inline-flex items-center gap-1 font-semibold text-[#553cfb] truncate max-w-xs sm:max-w-md">
+                        <FileCode className="w-3.5 h-3.5 flex-shrink-0" />
+                        {dubbedFileName}
+                        {isLoading ? " • Processing & Auto-saving..." : " • Ready"}
+                      </span>
+                    ) : (
+                      "Select or drop .html file to auto-extract and save directly to Movie Catalog"
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-shrink-0">
+                {dubbedFileName && !isLoading && (
+                  <button
+                    type="button"
+                    onClick={() => setDubbedFileName(null)}
+                    className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Clear uploaded file"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => dubbedFileInputRef.current?.click()}
+                  disabled={isLoading}
+                  className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white shadow-md transition-all cursor-pointer ${
+                    isLoading
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-[#553cfb] hover:bg-[#462ee6] shadow-[#553cfb]/25 active:scale-95"
+                  }`}
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>{isLoading ? "Processing..." : dubbedFileName ? "Upload Different HTML" : "Upload HTML File"}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-purple-100"></div>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-gray-400">
+                Or Paste Scraped HTML Code Manually
+              </span>
+              <div className="flex-1 h-px bg-purple-100"></div>
+            </div>
+
             <textarea
               className="w-full h-72 bg-[#f8f9fe] border border-gray-200 rounded-xl p-4 font-mono text-xs sm:text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-[#553cfb]/25 focus:border-[#553cfb] resize-none"
               placeholder='Paste your HTML here...&#10;&#10;e.g.,&#10;<div class="card">&#10;  <div class="poster-box">...</div>&#10;...&#10;</div>'
@@ -591,7 +757,7 @@ export default function AdminPage() {
                 Duplicates with matching IDs or titles are automatically refreshed.
               </span>
               <button
-                onClick={handleGenerate}
+                onClick={() => handleGenerate()}
                 disabled={isLoading}
                 className={`px-6 py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all cursor-pointer ${
                   isLoading
@@ -615,8 +781,8 @@ export default function AdminPage() {
                 <h2 className="text-lg font-black text-gray-900">Add & Update Original Movies Catalog</h2>
               </div>
               <p className="text-xs sm:text-sm text-gray-500 mt-1">
-                Paste HTML table rows (containing <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;tr&gt;...&lt;td&gt;...&lt;/td&gt;&lt;/tr&gt;</code>) into the box below.
-                Movies are parsed with high-res TMDB posters, language categories, and multi-server streaming links (Vidcore, Vidsu, Vidme, Vidru, Nightflix) saved to <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">original_movies.json</code>.
+                Upload an HTML file or paste HTML table rows (containing <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;tr&gt;...&lt;td&gt;...&lt;/td&gt;&lt;/tr&gt;</code>).
+                Uploading a file will automatically extract original movies and save into <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">original_movies.json</code> immediately.
               </p>
             </div>
 
@@ -646,6 +812,103 @@ export default function AdminPage() {
               </div>
             )}
 
+            {/* Upload HTML File Area */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingOriginal(true);
+              }}
+              onDragLeave={() => setIsDraggingOriginal(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingOriginal(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleFileUpload(file, "original");
+              }}
+              className={`rounded-2xl border-2 border-dashed p-5 transition-all flex flex-col sm:flex-row items-center justify-between gap-4 ${
+                isDraggingOriginal
+                  ? "border-[#553cfb] bg-[#553cfb]/5 scale-[1.01]"
+                  : "border-purple-200 hover:border-[#553cfb]/60 bg-gradient-to-r from-purple-50/40 via-[#f8f9fe] to-pink-50/30"
+              }`}
+            >
+              <input
+                type="file"
+                ref={originalFileInputRef}
+                accept=".html,.htm,.txt,text/html,text/plain"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileUpload(file, "original");
+                  e.target.value = "";
+                }}
+              />
+
+              <div className="flex items-center gap-3.5 w-full sm:w-auto">
+                <div className="w-12 h-12 rounded-xl bg-white border border-purple-100 shadow-xs flex items-center justify-center text-[#553cfb] flex-shrink-0">
+                  {isOriginalLoading ? (
+                    <RefreshCw className="w-6 h-6 animate-spin text-[#553cfb]" />
+                  ) : (
+                    <UploadCloud className="w-6 h-6 text-[#553cfb]" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-extrabold text-gray-900">
+                      Upload Original Movies HTML File
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      ⚡ Auto Extract & Save
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {originalFileName ? (
+                      <span className="inline-flex items-center gap-1 font-semibold text-[#553cfb] truncate max-w-xs sm:max-w-md">
+                        <FileCode className="w-3.5 h-3.5 flex-shrink-0" />
+                        {originalFileName}
+                        {isOriginalLoading ? " • Processing & Auto-saving..." : " • Ready"}
+                      </span>
+                    ) : (
+                      "Select or drop .html file with table rows to auto-extract & save to Original Movies Catalog"
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-shrink-0">
+                {originalFileName && !isOriginalLoading && (
+                  <button
+                    type="button"
+                    onClick={() => setOriginalFileName(null)}
+                    className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Clear uploaded file"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => originalFileInputRef.current?.click()}
+                  disabled={isOriginalLoading}
+                  className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white shadow-md transition-all cursor-pointer ${
+                    isOriginalLoading
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-110 shadow-[#553cfb]/25 active:scale-95"
+                  }`}
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>{isOriginalLoading ? "Processing..." : originalFileName ? "Upload Different HTML" : "Upload HTML File"}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-purple-100"></div>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-gray-400">
+                Or Paste Table Rows HTML Manually
+              </span>
+              <div className="flex-1 h-px bg-purple-100"></div>
+            </div>
+
             <textarea
               className="w-full h-72 bg-[#f8f9fe] border border-gray-200 rounded-xl p-4 font-mono text-xs sm:text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-[#553cfb]/25 focus:border-[#553cfb] resize-none"
               placeholder='Paste your table rows (&lt;tr&gt;...&lt;/tr&gt;) HTML here...&#10;&#10;e.g.,&#10;&lt;tr&gt;&#10;  &lt;td&gt;1&lt;/td&gt;&#10;  &lt;td&gt;&lt;img src="https://image.tmdb.org/t/p/w500/..." ...&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;strong&gt;Movie Title&lt;/strong&gt;&lt;/td&gt;&#10;  &lt;td&gt;Movie story overview...&lt;/td&gt;&#10;  &lt;td&gt;2024-09-21&lt;/td&gt;&#10;  &lt;td&gt;&lt;span class="badge-tag"&gt;ML&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;span class="badge-country"&gt;IN&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;118 min&lt;/td&gt;&#10;  &lt;td&gt;⭐ 6.8&lt;/td&gt;&#10;  &lt;td&gt;&lt;a href="https://nightflix.vg/movie/927547"&gt;Play Movie&lt;/a&gt;&lt;/td&gt;&#10;&lt;/tr&gt;'
@@ -658,7 +921,7 @@ export default function AdminPage() {
                 Duplicates with matching TMDB IDs or titles are refreshed and moved to the top.
               </span>
               <button
-                onClick={handleGenerateOriginal}
+                onClick={() => handleGenerateOriginal()}
                 disabled={isOriginalLoading}
                 className={`px-6 py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all cursor-pointer ${
                   isOriginalLoading
@@ -682,7 +945,8 @@ export default function AdminPage() {
                 <h2 className="text-lg font-black text-gray-900">Add & Update Web Series Catalog</h2>
               </div>
               <p className="text-xs sm:text-sm text-gray-500 mt-1">
-                Paste HTML table rows containing episodic TV data (with <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;tr&gt;...&lt;td&gt;...&lt;/td&gt;&lt;/tr&gt;</code>). Episodes are grouped automatically by show, season, and episode number into <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">web_series.json</code>.
+                Upload an HTML file or paste HTML table rows containing episodic TV data (with <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">&lt;tr&gt;...&lt;td&gt;...&lt;/td&gt;&lt;/tr&gt;</code>).
+                Uploading a file will automatically group episodes by show, season, and episode number into <code className="bg-gray-100 px-1.5 py-0.5 rounded text-purple-700 font-semibold">web_series.json</code> immediately.
               </p>
             </div>
 
@@ -710,6 +974,103 @@ export default function AdminPage() {
               </div>
             )}
 
+            {/* Upload HTML File Area */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingWebSeries(true);
+              }}
+              onDragLeave={() => setIsDraggingWebSeries(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingWebSeries(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleFileUpload(file, "web_series");
+              }}
+              className={`rounded-2xl border-2 border-dashed p-5 transition-all flex flex-col sm:flex-row items-center justify-between gap-4 ${
+                isDraggingWebSeries
+                  ? "border-[#553cfb] bg-[#553cfb]/5 scale-[1.01]"
+                  : "border-purple-200 hover:border-[#553cfb]/60 bg-gradient-to-r from-purple-50/40 via-[#f8f9fe] to-indigo-50/30"
+              }`}
+            >
+              <input
+                type="file"
+                ref={webSeriesFileInputRef}
+                accept=".html,.htm,.txt,text/html,text/plain"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileUpload(file, "web_series");
+                  e.target.value = "";
+                }}
+              />
+
+              <div className="flex items-center gap-3.5 w-full sm:w-auto">
+                <div className="w-12 h-12 rounded-xl bg-white border border-purple-100 shadow-xs flex items-center justify-center text-[#553cfb] flex-shrink-0">
+                  {isWebSeriesLoading ? (
+                    <RefreshCw className="w-6 h-6 animate-spin text-[#553cfb]" />
+                  ) : (
+                    <UploadCloud className="w-6 h-6 text-[#553cfb]" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-extrabold text-gray-900">
+                      Upload Web Series HTML File
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      ⚡ Auto Extract & Save
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {webSeriesFileName ? (
+                      <span className="inline-flex items-center gap-1 font-semibold text-[#553cfb] truncate max-w-xs sm:max-w-md">
+                        <FileCode className="w-3.5 h-3.5 flex-shrink-0" />
+                        {webSeriesFileName}
+                        {isWebSeriesLoading ? " • Processing & Auto-saving..." : " • Ready"}
+                      </span>
+                    ) : (
+                      "Select or drop .html file with episodic TV table rows to auto-extract & save to Web Series Catalog"
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-shrink-0">
+                {webSeriesFileName && !isWebSeriesLoading && (
+                  <button
+                    type="button"
+                    onClick={() => setWebSeriesFileName(null)}
+                    className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Clear uploaded file"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => webSeriesFileInputRef.current?.click()}
+                  disabled={isWebSeriesLoading}
+                  className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white shadow-md transition-all cursor-pointer ${
+                    isWebSeriesLoading
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-gradient-to-r from-[#553cfb] to-[#7b46fa] hover:brightness-110 shadow-[#553cfb]/25 active:scale-95"
+                  }`}
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>{isWebSeriesLoading ? "Processing..." : webSeriesFileName ? "Upload Different HTML" : "Upload HTML File"}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-purple-100"></div>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-gray-400">
+                Or Paste Episodic Rows HTML Manually
+              </span>
+              <div className="flex-1 h-px bg-purple-100"></div>
+            </div>
+
             <textarea
               className="w-full h-72 bg-[#f8f9fe] border border-gray-200 rounded-xl p-4 font-mono text-xs sm:text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-[#553cfb]/25 focus:border-[#553cfb] resize-none"
               placeholder='Paste your table rows (&lt;tr&gt;...&lt;/tr&gt;) HTML here...&#10;&#10;e.g.,&#10;&lt;tr&gt;&#10;  &lt;td&gt;1&lt;/td&gt;&#10;  &lt;td&gt;&lt;img src="https://image.tmdb.org/t/p/w500/..." ...&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;strong&gt;India&apos;s Got Latent&lt;/strong&gt;&lt;br&gt;&lt;span&gt;ID: 262838&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;span class="badge-season"&gt;S01&lt;/span&gt; &lt;span class="badge-ep"&gt;E01&lt;/span&gt;&lt;/td&gt;&#10;  &lt;td&gt;&lt;strong&gt;Episode 1&lt;/strong&gt;&lt;/td&gt;&#10;  &lt;td&gt;Episode description...&lt;/td&gt;&#10;  &lt;td&gt;2024-06-14&lt;/td&gt;&#10;  &lt;td&gt;44 min&lt;/td&gt;&#10;  &lt;td&gt;⭐ 9.0&lt;/td&gt;&#10;  &lt;td&gt;&lt;a href="https://vidcore.net/tv/262838/1/1"&gt;Vidcore&lt;/a&gt;&lt;/td&gt;&#10;&lt;/tr&gt;'
@@ -722,7 +1083,7 @@ export default function AdminPage() {
                 Shows with matching TMDB IDs or titles are refreshed and moved to the top of the catalog.
               </span>
               <button
-                onClick={handleGenerateWebSeries}
+                onClick={() => handleGenerateWebSeries()}
                 disabled={isWebSeriesLoading}
                 className={`px-6 py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all cursor-pointer ${
                   isWebSeriesLoading
